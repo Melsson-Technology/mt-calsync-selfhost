@@ -164,7 +164,23 @@ namespace Core.MTCalSync
 			}
 			else
 			{
-				foreach (var ev in byId.Values) cs.Items.Add(ToRemoteEvent(ev));
+				foreach (var ev in byId.Values)
+				{
+					var re = ToRemoteEvent(ev);
+					// calendarView/delta expands a recurring series into occurrences, but an
+					// unmodified occurrence comes back LOSSY — empty subject/iCalUId and isAllDay
+					// dropped to false. Mirrored as-is that becomes a "(no title)", non-all-day
+					// event, and the empty uid also defeats iCalUId adoption (duplicating an event
+					// that already exists on the other side). Re-read the full occurrence to
+					// restore a self-consistent subject / all-day / times / uid.
+					if (!re.IsDeleted && re.IsRecurringInstance && !string.IsNullOrEmpty(re.Id)
+						&& (string.IsNullOrEmpty(re.ICalUid) || string.IsNullOrEmpty(re.Subject)))
+					{
+						try { var full = await GetAsync(re.Id); if (full != null) re = full; }
+						catch (Exception ex) { Common.writeToLog("WARN enrich occurrence " + re.Id + ": " + ex.Message); }
+					}
+					cs.Items.Add(re);
+				}
 			}
 			cs.NewToken = deltaLink;
 			return cs;

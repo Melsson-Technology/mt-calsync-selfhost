@@ -93,6 +93,28 @@ namespace Core.MTCalSync
 		public EventMapping? findByOriginId(long pair, string originProv, string originId) =>
 			findBySideKey(pair, originProv, string.IsNullOrEmpty(originId) ? string.Empty : Common.Sha256Hex(originId));
 
+		// Active mapping for this pair where `originSide` is the authoritative side and the
+		// stored origin iCalUId matches. The origin iCalUId is STABLE across provider id-churn
+		// (Exchange reissues an event's id on some edits/accepts), so this recovers a mapping
+		// the side-key lookup lost — the alternative being a spurious Create (duplicate mirror).
+		// Index-served by idx_map_left_ical / idx_map_right_ical (pairID, {left|right}ICalUid).
+		public EventMapping? findActiveByOriginUid(long pair, string originSide, string iCalUid)
+		{
+			if (string.IsNullOrEmpty(iCalUid)) return null;
+			string col = originSide == Providers.M365 ? "leftICalUid" : "rightICalUid";
+			var oDA = new DataAccess();
+			var p = new Dictionary<string, object> { { "@p", pair }, { "@s", originSide }, { "@u", iCalUid } };
+			try
+			{
+				var ds = oDA.execQuery(
+					$"select * from event_mapping where pairID=@p and originProvider=@s and {col}=@u and status='active' order by mappingID limit 1",
+					"DATA", "DATA", p);
+				if (ds.Tables[0].Rows.Count > 0) return dataRowToObject(ds.Tables[0].Rows[0]);
+			}
+			catch (Exception ex) { Common.writeToLog("ERROR EventMapping.findActiveByOriginUid:", ex); }
+			return null;
+		}
+
 		// True when a DIFFERENT pair holds an ACTIVE mapping in which `eventKey` is that
 		// pair's MIRROR on `side` (its originProvider is the OTHER side). This is how we
 		// recognise an event that another pair wrote into a SHARED destination calendar,

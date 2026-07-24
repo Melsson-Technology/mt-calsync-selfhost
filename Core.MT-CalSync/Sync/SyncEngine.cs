@@ -269,6 +269,28 @@ namespace Core.MTCalSync
 
 			var m = _map.findBySideKey(_pair.pairID, side, Common.Sha256Hex(c.Id));
 
+			// EntryID-churn recovery: Exchange reissues an event's id on some edits/accepts,
+			// so the side-key lookup can miss an event we ALREADY mirror. Left unhandled it
+			// falls through to Create and duplicates the mirror (edit→revert = 2 churns = 3
+			// copies). The origin iCalUId survives that churn — recover the existing mapping
+			// by it (native origin-side singles/masters only) and re-key it to the reissued id
+			// so the normal update/no-op path below takes over. Skips our own mirrors (echo)
+			// and @removed deltas (no uid).
+			if (m == null && !c.IsDeleted && !c.IsRecurringInstance && !string.IsNullOrEmpty(c.ICalUid)
+				&& !c.Stamp.IsOurMirrorOn(side, _pair.pairID))
+			{
+				var churned = _map.findActiveByOriginUid(_pair.pairID, side, c.ICalUid);
+				if (churned != null && churned.originProvider == side)
+				{
+					Common.audit($"pair={_pair.pairID} op=rekey side={side} mapping={churned.mappingID} " +
+						$"oldId={churned.EventIdForSide(side)} newId={c.Id} uid={c.ICalUid} result=ok");
+					churned.SetSide(side, c.Id, c.ICalUid, c.Etag);
+					churned.save();
+					run.adoptedCount++;
+					m = churned;
+				}
+			}
+
 			// echo: our own mirror coming back (stamp inline, or mapping says origin!=side).
 			bool isEcho = c.Stamp.IsOurMirrorOn(side, _pair.pairID) || (m != null && m.originProvider != side);
 			if (isEcho) return HandleEcho(side, c, m, run);

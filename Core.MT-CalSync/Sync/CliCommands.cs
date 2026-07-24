@@ -268,6 +268,11 @@ namespace Core.MTCalSync
 						Console.WriteLine($"      id={e.Id}");
 						Console.WriteLine($"      uid={e.ICalUid}");
 						Console.WriteLine($"      attendees={e.AttendeeNames.Count}  allDay={e.IsAllDay}  showAs={e.ShowAs}  seriesMaster={e.IsSeriesMaster}");
+						// What the SYNC ENGINE actually saw from the delta read (`it`), before the
+						// per-event GetAsync enrichment (`e`). Divergence here = the delta is lossy,
+						// which is exactly what breaks projection/adoption.
+						if (conn.provider == Providers.M365 && (it.Subject != e.Subject || it.ICalUid != e.ICalUid || it.IsAllDay != e.IsAllDay || it.IsRecurringInstance != e.IsRecurringInstance))
+							Console.WriteLine($"      delta-read: subj=\"{it.Subject}\" uid=\"{it.ICalUid}\" allDay={it.IsAllDay} type={(it.IsSeriesMaster ? "master" : it.IsRecurringInstance ? "occurrence" : "single")} seriesMasterId={it.SeriesMasterId}");
 						Console.WriteLine($"      stamp: managed={(e.Stamp.Managed ? "YES" : "no")} origin={e.Stamp.OriginSystem} pair={e.Stamp.PairId} oid={e.Stamp.OriginId} originUid={e.Stamp.OriginICalUid}");
 					}
 				}
