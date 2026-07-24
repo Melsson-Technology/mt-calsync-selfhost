@@ -1,0 +1,32 @@
+# Build output
+bin/
+obj/
+build/
+
+# Secrets — NEVER commit. Only the *.example templates are tracked.
+settings.xml
+google-sa.json
+# Google service-account key downloads (GCP names them <project-id>-<keyid>.json):
+mt-calsync-*.json
+*.pem
+*.key
+*.pfx
+*.p12
+.env
+.env.*
+*-sa.json
+credentials.json
+
+# Runtime logs
+logs/
+*.log
+
+# IDE / OS
+.vs/
+.idea/
+*.user
+Thumbs.db
+.DS_Store
+
+# Local agent/tooling config
+.claude/

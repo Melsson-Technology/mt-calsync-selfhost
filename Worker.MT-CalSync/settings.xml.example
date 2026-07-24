@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    MT-CalSync — settings.xml template.
+    Copy to settings.xml (gitignored) and fill in real values, OR let
+    provision-server.sh write /etc/mtcalsync/settings.xml on the server.
+    Lives next to the assembly at runtime (Settings.cs loads it from there).
+
+    Secrets (GraphClientSecret, SmtpPassword, optional inline Google JSON) can also
+    be stored AES-encrypted in the DB settings table via `set-secret <name> <value>`,
+    which takes precedence over the plaintext here.
+-->
+<Settings>
+    <!-- Database (MySQL) -->
+    <MySqlDatabaseConnection>Server=127.0.0.1;Port=3306;Database=mtcalsync;Uid=mtcalsync_app;Pwd=CHANGE_ME;SslMode=Required;</MySqlDatabaseConnection>
+
+    <!-- Microsoft 365 / Graph — app-only client credentials.
+         Entra app registration with APPLICATION permission Calendars.ReadWrite (admin
+         consented). See _docs/Setup-Guide.md. -->
+    <GraphTenantId>00000000-0000-0000-0000-000000000000</GraphTenantId>
+    <GraphClientId>00000000-0000-0000-0000-000000000000</GraphClientId>
+    <GraphClientSecret>REPLACE_ME_or_use_set-secret</GraphClientSecret>
+
+    <!-- Google Workspace — service account + domain-wide delegation.
+         Preferred: a path to the downloaded SA JSON key (chmod 0600). Alternatively
+         store the JSON encrypted in the DB via `set-secret GoogleServiceAccountJson <json>`. -->
+    <GoogleServiceAccountJsonPath>/etc/mtcalsync/google-sa.json</GoogleServiceAccountJsonPath>
+    <GoogleServiceAccountJson></GoogleServiceAccountJson>
+
+    <!-- Sync defaults (per-pair values in sync_pair override these) -->
+    <WindowDays>60</WindowDays>
+    <LookbackDays>1</LookbackDays>
+    <FidelityMode>full_detail</FidelityMode>          <!-- full_detail | busy_block -->
+    <CopyAttendeesToBody>false</CopyAttendeesToBody>   <!-- names as text; never real guests -->
+    <MaxWritesPerRun>25</MaxWritesPerRun>             <!-- circuit-breaker threshold -->
+    <FullResyncHour>3</FullResyncHour>                <!-- UTC hour for the daily window-sliding full reconcile -->
+    <MaxDeltaPages>50</MaxDeltaPages>
+
+    <!-- Provenance stamp namespace — keep STABLE across deploys (changing it orphans
+         every existing stamp). AppInstanceId tags this app's writes. -->
+    <ExtPropNamespaceGuid>b7c9e3a2-6d41-4f8b-9c2e-a1b2c3d4e5f6</ExtPropNamespaceGuid>
+    <AppInstanceId>mt-calsync</AppInstanceId>
+
+    <!-- SMTP — failure alerts (optional; leave SmtpHost blank to disable email). -->
+    <SmtpHost>smtp.sendgrid.net</SmtpHost>
+    <SmtpPort>587</SmtpPort>
+    <SmtpUseSsl>true</SmtpUseSsl>
+    <SmtpUser>apikey</SmtpUser>
+    <SmtpPassword>REPLACE_ME_or_use_set-secret</SmtpPassword>
+    <SmtpFrom>mt-calsync@example.com</SmtpFrom>
+    <AlertTo>you@example.com</AlertTo>
+</Settings>

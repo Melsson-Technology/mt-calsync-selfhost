@@ -1,0 +1,129 @@
+@model SettingsViewModel
+@{
+    ViewData["Title"] = "Settings";
+}
+
+<h1>Credentials &amp; configuration</h1>
+<p class="muted" style="margin-bottom:18px">
+    Everything the sync worker needs. Secrets are stored AES-encrypted and never shown back —
+    only a masked status. Leave a secret field blank to keep the stored value. Plain settings
+    are saved to the database and take effect on the next sync (no redeploy).
+</p>
+
+<form asp-action="Save" method="post" autocomplete="off">
+    @Html.AntiForgeryToken()
+
+    <div class="card">
+        <h2>Microsoft 365 (Graph — app-only)</h2>
+        <div class="muted" style="margin:-6px 0 14px">
+            Entra app registration with the <code>Calendars.ReadWrite</code> <em>application</em> permission (admin-consented).
+        </div>
+        <div class="row">
+            <div class="field"><label>Tenant ID</label><input asp-for="GraphTenantId" placeholder="00000000-0000-0000-0000-000000000000" /></div>
+            <div class="field"><label>Client (application) ID</label><input asp-for="GraphClientId" placeholder="00000000-0000-0000-0000-000000000000" /></div>
+        </div>
+        <div class="field">
+            <label>Client secret <span class="badge off">@Model.GraphClientSecretStatus</span></label>
+            <input type="password" name="graphClientSecret" autocomplete="new-password" placeholder="Leave blank to keep current secret" />
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Google Workspace (service account + domain-wide delegation)</h2>
+        <div class="muted" style="margin:-6px 0 14px">
+            Paste the service-account JSON key below (stored encrypted), or leave it blank and set a file path the worker can read.
+        </div>
+        <div class="field">
+            <label>Service-account JSON <span class="badge off">@Model.GoogleJsonStatus</span></label>
+            <textarea name="googleServiceAccountJson" rows="5" placeholder='Leave blank to keep current. Paste the full { "type": "service_account", ... } key here.'></textarea>
+        </div>
+        <div class="field">
+            <label>…or JSON key file path on the server (optional; wins if set)</label>
+            <input asp-for="GoogleServiceAccountJsonPath" placeholder="/etc/mtcalsync/google-sa.json" />
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Sync defaults</h2>
+        <div class="muted" style="margin:-6px 0 14px">Applied to new pairs; existing pairs keep their own values.</div>
+        <div class="row">
+            <div class="field"><label>Window forward (days)</label><input asp-for="WindowDays" type="number" min="1" /></div>
+            <div class="field"><label>Lookback (days)</label><input asp-for="LookbackDays" type="number" min="0" /></div>
+            <div class="field"><label>Max writes / run (circuit breaker)</label><input asp-for="MaxWritesPerRun" type="number" min="1" /></div>
+            <div class="field"><label>Daily full-resync hour (UTC)</label><input asp-for="FullResyncHour" type="number" min="0" max="23" /></div>
+        </div>
+        <div class="row">
+            <div class="field">
+                <label>Fidelity</label>
+                <select asp-for="FidelityMode">
+                    <option value="full_detail">full_detail — copy title/location/notes</option>
+                    <option value="busy_block">busy_block — opaque "Busy"</option>
+                </select>
+            </div>
+            <div class="field" style="align-self:end">
+                <label class="check"><input asp-for="CopyAttendeesToBody" type="checkbox" /> Embed attendee names in body (never as guests)</label>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Email alerts (SMTP, optional)</h2>
+        <div class="row">
+            <div class="field" style="flex:2"><label>SMTP host</label><input asp-for="SmtpHost" placeholder="smtp.sendgrid.net (blank disables alerts)" /></div>
+            <div class="field"><label>Port</label><input asp-for="SmtpPort" type="number" /></div>
+            <div class="field" style="align-self:end"><label class="check"><input asp-for="SmtpUseSsl" type="checkbox" /> Use TLS</label></div>
+        </div>
+        <div class="row">
+            <div class="field"><label>SMTP username</label><input asp-for="SmtpUser" placeholder="apikey" /></div>
+            <div class="field">
+                <label>SMTP password <span class="badge off">@Model.SmtpPasswordStatus</span></label>
+                <input type="password" name="smtpPassword" autocomplete="new-password" placeholder="Leave blank to keep current" />
+            </div>
+        </div>
+        <div class="row">
+            <div class="field"><label>From address</label><input asp-for="SmtpFrom" placeholder="mt-calsync@example.com" /></div>
+            <div class="field"><label>Alert to</label><input asp-for="AlertTo" placeholder="you@example.com" /></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Delegated OAuth clients (user account connections)</h2>
+        <div class="muted" style="margin:-6px 0 14px">
+            The multitenant Microsoft Entra app and Google OAuth web client that users consent to when
+            connecting their accounts. Redirect URIs: <code>/oauth/microsoft/callback</code> and
+            <code>/oauth/google/callback</code> on the public base URL below.
+        </div>
+        <div class="row">
+            <div class="field"><label>Microsoft client (application) ID</label><input asp-for="MsOAuthClientId" placeholder="00000000-0000-0000-0000-000000000000" /></div>
+            <div class="field">
+                <label>Microsoft client secret <span class="badge off">@Model.MsOAuthClientSecretStatus</span></label>
+                <input type="password" name="msOAuthClientSecret" autocomplete="new-password" placeholder="Leave blank to keep current" />
+            </div>
+        </div>
+        <div class="row">
+            <div class="field"><label>Google client ID</label><input asp-for="GoogleOAuthClientId" placeholder="….apps.googleusercontent.com" /></div>
+            <div class="field">
+                <label>Google client secret <span class="badge off">@Model.GoogleOAuthClientSecretStatus</span></label>
+                <input type="password" name="googleOAuthClientSecret" autocomplete="new-password" placeholder="Leave blank to keep current" />
+            </div>
+        </div>
+        <div class="field">
+            <label class="check"><input asp-for="UnverifiedAppNotice" type="checkbox" />
+                Show the "you may see an unverified-app screen" note on the connect page (turn off once provider verification clears)</label>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Service</h2>
+        <div class="row">
+            <div class="field" style="flex:2">
+                <label>Public base URL (emailed links + OAuth redirects)</label>
+                <input asp-for="PublicBaseUrl" placeholder="https://calendar.example.com" />
+            </div>
+            <div class="field"><label>Worker concurrency</label><input asp-for="WorkerMaxConcurrency" type="number" min="1" max="16" /></div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Save settings</button>
+    <a class="btn" asp-controller="Home" asp-action="Index">Back to dashboard</a>
+</form>

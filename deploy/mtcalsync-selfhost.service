@@ -1,0 +1,26 @@
+[Unit]
+Description=MT-CalSync self-host admin portal (Kestrel)
+After=network-online.target mysql.service mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=mtcalsync
+Group=mtcalsync
+WorkingDirectory=/opt/mtcalsync/selfhost-publish
+ExecStart=/usr/bin/dotnet /opt/mtcalsync/selfhost-publish/SelfHost.MT-CalSync.dll
+Restart=on-failure
+RestartSec=5
+SyslogIdentifier=mtcalsync-selfhost
+EnvironmentFile=/etc/mtcalsync/selfhost.env
+
+# Hardening. dpkeys holds the DataProtection key ring (cookie / OAuth-state crypto)
+# — it must persist across deploys and be writable.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mtcalsync/selfhost-publish /etc/mtcalsync/dpkeys
+
+[Install]
+WantedBy=multi-user.target

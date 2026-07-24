@@ -1,0 +1,23 @@
+[Unit]
+Description=MT-CalSync worker (%i)
+After=network-online.target mysql.service mariadb.service
+Wants=network-online.target
+
+# Templated one-shot unit: the instance name is the Worker subcommand, e.g.
+#   systemctl start mtcalsync-worker@sync.service
+#   systemctl start mtcalsync-worker@setup-check.service
+# The mtcalsync-sync.timer fires @sync on a schedule.
+[Service]
+Type=oneshot
+User=mtcalsync
+Group=mtcalsync
+WorkingDirectory=/opt/mtcalsync/worker-publish
+ExecStart=/usr/bin/dotnet /opt/mtcalsync/worker-publish/Worker.MT-CalSync.dll %i
+SyslogIdentifier=mtcalsync-%i
+
+# Hardening. The worker writes logs/ next to its assembly.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/mtcalsync/worker-publish

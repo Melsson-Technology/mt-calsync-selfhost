@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex, nofollow, noarchive, nosnippet" />
+    <title>@ViewData["Title"] · MT-CalSync</title>
+    <style>
+        :root {
+            --bg:#f6f7fb; --card:#ffffff; --ink:#0f172a; --body:#334155; --muted:#64748b;
+            --line:#e2e8f0; --line-soft:#eef1f6;
+            --brand:#0f172a; --accent:#4f46e5; --accent-hover:#4338ca; --accent-soft:#eef2ff;
+            --ok:#047857; --ok-bg:#ecfdf5; --ok-line:#a7f3d0;
+            --warn:#b45309; --warn-bg:#fffbeb; --warn-line:#fde68a;
+            --danger:#b91c1c; --danger-bg:#fef2f2; --danger-line:#fecaca;
+            --off:#64748b; --off-bg:#f1f5f9; --off-line:#e2e8f0;
+        }
+        * { box-sizing: border-box; }
+        body { margin:0; font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+               background:var(--bg); color:var(--body); font-size:14px; line-height:1.55;
+               -webkit-font-smoothing:antialiased; }
+
+        /* ── top bar ─────────────────────────────────────────────────────── */
+        .nav { background:linear-gradient(180deg,#111c33,#0f172a); color:#fff; padding:0 22px;
+               display:flex; align-items:center; gap:4px; height:56px;
+               box-shadow:0 1px 0 rgba(255,255,255,.06) inset, 0 1px 3px rgba(15,23,42,.25); }
+        .nav .brand { font-weight:700; letter-spacing:.2px; font-size:15px; color:#fff;
+                      display:flex; align-items:center; gap:9px; margin-right:18px; text-decoration:none; }
+        .nav .brand::before { content:""; width:18px; height:18px; border-radius:5px; flex:none;
+                              background:linear-gradient(135deg,#6366f1 0%,#8b5cf6 55%,#22d3ee 130%);
+                              box-shadow:0 0 0 3px rgba(99,102,241,.22); }
+        .nav a { color:#94a3b8; text-decoration:none; padding:0 11px; font-weight:500;
+                 height:56px; display:inline-flex; align-items:center; position:relative;
+                 transition:color .12s ease; }
+        .nav a:hover { color:#e2e8f0; }
+        .nav a.active { color:#fff; }
+        .nav a.active::after { content:""; position:absolute; left:11px; right:11px; bottom:0;
+                               height:2px; border-radius:2px 2px 0 0; background:var(--accent); }
+        .nav .spacer { flex:1; }
+        .nav form { margin:0 0 0 10px; }
+        .nav .btn { background:rgba(148,163,184,.12); border-color:transparent; color:#cbd5e1; }
+        .nav .btn:hover { background:rgba(148,163,184,.22); color:#fff; }
+
+        /* ── page scaffold ───────────────────────────────────────────────── */
+        .container { max-width:980px; margin:30px auto 60px; padding:0 22px; }
+        h1 { font-size:22px; font-weight:650; letter-spacing:-.2px; color:var(--ink); margin:0 0 4px; }
+        h2 { font-size:15px; font-weight:650; color:var(--ink); margin:0 0 12px; }
+        h1 + .muted, h1 + p.muted { margin-top:0; }
+        .muted { color:var(--muted); font-size:13px; }
+        a { color:var(--accent); }
+        code { background:var(--off-bg); border:1px solid var(--line-soft); padding:1px 6px;
+               border-radius:5px; font-size:12px; color:var(--ink); }
+
+        /* ── cards ───────────────────────────────────────────────────────── */
+        .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+                padding:20px 22px; margin:16px 0 18px;
+                box-shadow:0 1px 2px rgba(15,23,42,.05); }
+        .card.warn { border-color:var(--warn-line); background:var(--warn-bg); }
+        .card.danger { border-color:var(--danger-line); }
+
+        /* ── forms ───────────────────────────────────────────────────────── */
+        .field { margin-bottom:14px; min-width:0; }
+        .field label { display:block; font-size:12px; color:var(--muted); margin-bottom:5px; font-weight:600; }
+        input[type=text], input[type=password], input[type=number], input[type=email], select, textarea {
+            width:100%; padding:8px 11px; border:1px solid var(--line); border-radius:8px;
+            font:inherit; color:var(--ink); background:#fff; transition:border-color .12s, box-shadow .12s; }
+        input:focus, select:focus, textarea:focus {
+            outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(79,70,229,.14); }
+        textarea { resize:vertical; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+        .row { display:flex; gap:16px; flex-wrap:wrap; }
+        .row > * { flex:1; min-width:180px; }
+        .check { display:flex; align-items:center; gap:8px; color:var(--body); font-weight:500; }
+        .check input { width:auto; accent-color:var(--accent); }
+
+        /* ── buttons ─────────────────────────────────────────────────────── */
+        .btn { display:inline-block; border:1px solid var(--line); background:#fff; color:var(--ink);
+               padding:8px 15px; border-radius:8px; font:inherit; font-weight:600; cursor:pointer;
+               text-decoration:none; transition:background .12s, border-color .12s, box-shadow .12s; }
+        .btn:hover { background:var(--off-bg); border-color:#cbd5e1; }
+        .btn-primary { background:var(--accent); border-color:var(--accent); color:#fff;
+                       box-shadow:0 1px 2px rgba(79,70,229,.35); }
+        .btn-primary:hover { background:var(--accent-hover); border-color:var(--accent-hover); }
+        .btn-sm { padding:4px 11px; font-size:12.5px; border-radius:7px; }
+
+        /* ── badges ──────────────────────────────────────────────────────── */
+        .badge { display:inline-block; padding:2px 9px; border-radius:999px; font-size:11px;
+                 font-weight:650; letter-spacing:.02em; border:1px solid var(--off-line);
+                 background:var(--off-bg); color:var(--off); vertical-align:middle; }
+        .badge.ok { background:var(--ok-bg); color:var(--ok); border-color:var(--ok-line); }
+        .badge.warn { background:var(--warn-bg); color:var(--warn); border-color:var(--warn-line); }
+        .badge.off { background:var(--off-bg); color:var(--off); border-color:var(--off-line); }
+
+        /* ── tables ──────────────────────────────────────────────────────── */
+        table { width:100%; border-collapse:collapse; }
+        th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line-soft); }
+        th { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; font-weight:650; }
+        tbody tr:hover, table tr:hover td { background:#fafbfe; }
+        tr:last-child td { border-bottom:none; }
+        td form { display:inline; }
+
+        /* ── alerts / report ─────────────────────────────────────────────── */
+        .alert { padding:10px 14px; border-radius:9px; margin-bottom:16px; font-size:13px;
+                 font-weight:500; border:1px solid transparent; }
+        .alert-success { background:var(--ok-bg); color:var(--ok); border-color:var(--ok-line); }
+        .alert-danger { background:var(--danger-bg); color:var(--danger); border-color:var(--danger-line); }
+        pre.report { background:#0b1020; color:#d1d5db; padding:14px 16px; border-radius:10px;
+                     overflow:auto; font-size:12px; line-height:1.5; }
+
+        /* ── setup guide / steps ─────────────────────────────────────────── */
+        .card.ok { border-color:var(--ok-line); background:var(--ok-bg); }
+        .steps { list-style:none; margin:14px 0 0; padding:0; }
+        .step { display:flex; gap:13px; align-items:flex-start;
+                padding:14px 0; border-top:1px solid var(--line-soft); }
+        .step:first-child { border-top:none; padding-top:4px; }
+        .step-num { flex:none; width:26px; height:26px; border-radius:999px;
+                    display:flex; align-items:center; justify-content:center;
+                    font-weight:700; font-size:12.5px;
+                    border:1px solid var(--line); background:#fff; color:var(--muted); }
+        .step.current .step-num { background:var(--accent); border-color:var(--accent); color:#fff; }
+        .step.done .step-num { background:var(--ok-bg); border-color:var(--ok-line); color:var(--ok); }
+        .step-body { flex:1; min-width:0; }
+        .step-title { font-weight:650; color:var(--ink); }
+        .step.done .step-title, .step.todo .step-title { color:var(--muted); }
+        .step-desc { font-size:13px; color:var(--muted); margin:2px 0 0; }
+        .step-cta { margin-top:9px; }
+    </style>
+</head>
+<body>
+    @{
+        var ctrl = ViewContext.RouteData.Values["controller"] as string;
+        bool navIsAdmin = User.IsInRole("Admin");
+    }
+    <nav class="nav">
+        <a class="brand" asp-controller="Dashboard" asp-action="Index">MT-CalSync</a>
+        <a class="@(ctrl=="Dashboard"?"active":"")" asp-controller="Dashboard" asp-action="Index">Dashboard</a>
+        <a class="@(ctrl=="Connect"?"active":"")" asp-controller="Connect" asp-action="Index">Calendars</a>
+        <a class="@(ctrl=="Pairs"?"active":"")" asp-controller="Pairs" asp-action="Index">Pairs</a>
+        @if (navIsAdmin)
+        {
+            <a class="@(ctrl=="Home"?"active":"")" asp-controller="Home" asp-action="Index">System</a>
+            <a class="@(ctrl=="Admin"?"active":"")" asp-controller="Admin" asp-action="Monitoring">Monitoring</a>
+            <a class="@(ctrl=="Settings"?"active":"")" asp-controller="Settings" asp-action="Index">Settings</a>
+            <a class="@(ctrl=="SharedCalendars"?"active":"")" asp-controller="SharedCalendars" asp-action="Index">Shared calendars</a>
+        }
+        <span class="spacer"></span>
+        <span style="color:#94a3b8;padding:0 11px">@User.Identity?.Name</span>
+        <form asp-controller="Auth" asp-action="Logout" method="post">
+            @Html.AntiForgeryToken()
+            <button class="btn btn-sm" type="submit">Sign out</button>
+        </form>
+    </nav>
+    <div class="container">
+        @if (TempData["Info"] != null) { <div class="alert alert-success">@TempData["Info"]</div> }
+        @if (TempData["Error"] != null) { <div class="alert alert-danger">@TempData["Error"]</div> }
+        @RenderBody()
+    </div>
+</body>
+</html>

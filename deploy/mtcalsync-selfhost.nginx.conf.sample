@@ -1,0 +1,26 @@
+# MT-CalSync self-host — sample nginx reverse proxy.
+# Copy to /etc/nginx/sites-available/mtcalsync, edit the server_name, enable, then
+# obtain TLS with:  certbot --nginx -d calendar.example.com
+#
+# The portal binds to loopback (127.0.0.1:5091); nginx terminates TLS and forwards.
+# This is a plain public vhost — no IP allowlist. If you want to keep the portal
+# private, front it with HTTP basic auth or bind it to a VPN/SSH-tunnel interface
+# instead of exposing 443 publicly.
+
+server {
+    listen 80;
+    server_name calendar.example.com;   # <-- change me
+
+    # certbot inserts the TLS + redirect config here on first issue.
+    location / {
+        proxy_pass http://127.0.0.1:5091;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Don't leak the nginx version.
+    server_tokens off;
+}

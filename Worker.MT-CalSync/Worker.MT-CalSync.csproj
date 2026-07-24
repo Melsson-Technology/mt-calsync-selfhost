@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Core.MT-CalSync\Core.MT-CalSync.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Worker.MTCalSync</RootNamespace>
+    <AssemblyName>Worker.MT-CalSync</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Copy settings.xml next to the assembly at build/publish time if present
+         (gitignored — Matt provides). The example template always ships. On the
+         server the real file lives in /etc/mtcalsync and is symlinked in by the
+         deploy script. -->
+    <None Update="settings.xml" CopyToOutputDirectory="PreserveNewest" Condition="Exists('settings.xml')" />
+    <None Update="settings.xml.example" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

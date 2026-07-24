@@ -1,0 +1,73 @@
+@using Core.MTCalSync
+@{
+    ViewData["Title"] = "Connected accounts";
+    var accounts = (List<OAuthAccount>)ViewBag.Accounts;
+    bool msConfigured = (bool)ViewBag.MsConfigured;
+    bool googleConfigured = (bool)ViewBag.GoogleConfigured;
+}
+
+<h1>Connected accounts</h1>
+<p class="muted">Connect the Google and Microsoft accounts whose calendars you want to keep in sync.</p>
+
+<div class="card">
+    <h2>Add a connection</h2>
+    <p>
+        <a class="btn btn-primary" asp-action="Start" asp-route-provider="google">Connect Google</a>
+        <a class="btn btn-primary" asp-action="Start" asp-route-provider="microsoft">Connect Microsoft</a>
+    </p>
+    @if (!googleConfigured || !msConfigured)
+    {
+        <p class="muted">
+            @(!googleConfigured ? "Google connections aren't available yet. " : "")
+            @(!msConfigured ? "Microsoft connections aren't available yet." : "")
+        </p>
+    }
+    <p class="muted">You'll sign in with the provider and grant calendar access — we never see your password.
+        You can disconnect at any time, which deletes the stored access tokens.</p>
+    @if ((bool)(ViewBag.UnverifiedAppNotice ?? false))
+    {
+        <p class="muted">Heads-up: while our app verification with Google and Microsoft is in progress, their
+            consent screens may show an "unverified app" warning. Review the requested calendar permissions
+            and continue via "Advanced" if you're comfortable — the access requested is calendar-only either way.</p>
+    }
+</div>
+
+<div class="card">
+    <h2>Your accounts</h2>
+    @if (accounts.Count == 0)
+    {
+        <p class="muted">Nothing connected yet.</p>
+    }
+    else
+    {
+        <table>
+            <tr><th>Provider</th><th>Account</th><th>Status</th><th></th><th></th></tr>
+            @foreach (var a in accounts)
+            {
+                <tr>
+                    <td>@(a.provider == "google" ? "Google" : "Microsoft")</td>
+                    <td>@a.principalEmail</td>
+                    <td>
+                        @if (a.isConnected)
+                        {
+                            <span class="badge ok">connected</span>
+                        }
+                        else
+                        {
+                            <span class="badge warn">needs reconnect</span>
+                            <a class="btn btn-sm" asp-action="Start" asp-route-provider="@(a.provider == "google" ? "google" : "microsoft")">Reconnect</a>
+                        }
+                    </td>
+                    <td><a class="btn btn-sm" asp-action="Calendars" asp-route-accountId="@a.oauthAccountID">Calendars</a></td>
+                    <td>
+                        <form asp-action="Disconnect" method="post" onsubmit="return confirm('Disconnect @a.principalEmail? Stored tokens are deleted; sync pairs using it must be removed first.');">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="accountId" value="@a.oauthAccountID" />
+                            <button class="btn btn-sm" type="submit">Disconnect</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+        </table>
+    }
+</div>

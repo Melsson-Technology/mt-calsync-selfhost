@@ -1,0 +1,90 @@
+@using Core.MTCalSync
+@using SelfHost.MTCalSync.Controllers
+@model SelfHost.MTCalSync.Models.PairWizardModel
+@{
+    ViewData["Title"] = "New sync pair";
+}
+
+<h1>New sync pair</h1>
+<p class="muted">Pick a source calendar, a destination calendar, and how they should sync.</p>
+
+@if (!Model.CanCreate)
+{
+    <div class="card">
+        <p>@Model.BlockReason</p>
+        <a class="btn" asp-controller="Connect" asp-action="Index">Connected accounts</a>
+    </div>
+}
+else
+{
+    <form asp-action="Create" method="post">
+        @Html.AntiForgeryToken()
+        <div class="card">
+            <div class="row">
+                <div class="field">
+                    <label>Source calendar</label>
+                    <select name="sourceKey" required>
+                        <option value="">— choose —</option>
+                        @foreach (var a in Model.Accounts.Where(x => x.Calendars.Count > 0))
+                        {
+                            <optgroup label="@(a.Account.provider == "google" ? "Google" : "Microsoft") · @a.Account.principalEmail">
+                                @foreach (var c in a.Calendars)
+                                {
+                                    <option value="@PairsController.EncodeCalendarKey(a.Account.oauthAccountID, c.Id, c.Summary)">
+                                        @c.Summary@(c.Primary ? " (primary)" : "")
+                                    </option>
+                                }
+                            </optgroup>
+                        }
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Destination calendar</label>
+                    <select name="destKey" required>
+                        <option value="">— choose —</option>
+                        @foreach (var a in Model.Accounts.Where(x => x.Calendars.Count > 0))
+                        {
+                            <optgroup label="@(a.Account.provider == "google" ? "Google" : "Microsoft") · @a.Account.principalEmail">
+                                @foreach (var c in a.Calendars)
+                                {
+                                    <option value="@PairsController.EncodeCalendarKey(a.Account.oauthAccountID, c.Id, c.Summary)">
+                                        @c.Summary@(c.Primary ? " (primary)" : "")@(c.AccessRole is "reader" or "freeBusyReader" ? " (read-only)" : "")
+                                    </option>
+                                }
+                            </optgroup>
+                        }
+                    </select>
+                </div>
+            </div>
+            <div class="row">
+                <div class="field">
+                    <label>Direction</label>
+                    <select name="flow">
+                        <option value="twoway">Two-way (keep both in sync)</option>
+                        <option value="oneway">One-way (source → destination only)</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>What gets copied</label>
+                    <select name="mode" id="modeSelect">
+                        <option value="full">Full details (title, time, location, notes)</option>
+                        <option value="busy">Busy only (opaque “Busy” blocks — hides details)</option>
+                    </select>
+                </div>
+            </div>
+            <div class="field check">
+                <input type="checkbox" name="copyTitle" value="true" id="copyTitle" />
+                <label for="copyTitle" style="margin:0">In busy-only mode, still copy the event title</label>
+            </div>
+            <p class="muted">Cross-provider only: one side Google, the other Microsoft. Mirrored events never invite
+                attendees or send notifications.</p>
+            <button type="submit" class="btn btn-primary">Create pair</button>
+            <a class="btn" asp-action="Index">Cancel</a>
+        </div>
+    </form>
+
+    @foreach (var a in Model.Accounts.Where(x => x.Error.Length > 0))
+    {
+        <p class="muted">@a.Account.principalEmail: @a.Error</p>
+    }
+}

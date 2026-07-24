@@ -1,0 +1,37 @@
+@using Core.MTCalSync
+@{
+    var account = (OAuthAccount)ViewBag.Account;
+    var calendars = (IReadOnlyList<RemoteCalendar>)ViewBag.Calendars;
+    ViewData["Title"] = "Calendars — " + account.principalEmail;
+}
+
+<h1>Calendars</h1>
+<p class="muted">@(account.provider == "google" ? "Google" : "Microsoft") · @account.principalEmail</p>
+
+@if (ViewBag.Error != null)
+{
+    <div class="alert alert-danger">@ViewBag.Error</div>
+}
+
+<div class="card">
+    @if (calendars.Count == 0 && ViewBag.Error == null)
+    {
+        <p class="muted">No calendars visible to this account.</p>
+    }
+    else if (calendars.Count > 0)
+    {
+        <table>
+            <tr><th>Calendar</th><th>Access</th><th></th></tr>
+            @foreach (var c in calendars)
+            {
+                <tr>
+                    <td>@c.Summary</td>
+                    <td>@c.AccessRole</td>
+                    <td>@(c.Primary ? "primary" : "")</td>
+                </tr>
+            }
+        </table>
+    }
+</div>
+
+<p><a class="btn" asp-action="Index">Back to connected accounts</a></p>

@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Folder/assembly keep the house <Role>.<Product> name; the C# namespace
+         drops the hyphen (Core.MTCalSync) since '-' is illegal in an identifier. -->
+    <RootNamespace>Core.MTCalSync</RootNamespace>
+    <AssemblyName>Core.MT-CalSync</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MySql.Data" Version="9.7.0" />
+    <!-- Microsoft Graph v5 (app-only client-credentials) + Azure.Identity for the
+         ClientSecretCredential. Floating within the stable major line so a clean
+         network restore always resolves the latest compatible build. -->
+    <PackageReference Include="Microsoft.Graph" Version="5.*" />
+    <PackageReference Include="Azure.Identity" Version="1.*" />
+    <!-- Google Calendar v3 + service-account auth (domain-wide delegation). Pinned
+         to versions already in the local NuGet cache. -->
+    <PackageReference Include="Google.Apis.Calendar.v3" Version="1.75.0.4200" />
+    <PackageReference Include="Google.Apis.Auth" Version="1.75.0" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,111 @@
+@using Core.MTCalSync
+@model List<PairRow>
+@{
+    ViewData["Title"] = "Pairs";
+    bool isAdmin = User.IsInRole("Admin");
+    bool showAll = (bool)(ViewBag.ShowAll ?? false);
+}
+
+<h1>Sync pairs</h1>
+<p class="muted" style="margin-bottom:16px">
+    A pair links one Google calendar with one Microsoft calendar.
+</p>
+
+<p>
+    <a class="btn btn-primary" asp-action="Create">New sync pair</a>
+    @if (isAdmin)
+    {
+        <a class="btn btn-sm" asp-action="Index" asp-route-all="@(!showAll)">@(showAll ? "Show my pairs" : "Show all pairs (admin)")</a>
+    }
+</p>
+
+<div class="card">
+    <h2>@(showAll ? "All pairs" : "Your pairs")</h2>
+    @if (Model.Count == 0)
+    {
+        <p class="muted">None yet — create your first pair once both accounts are connected.</p>
+    }
+    else
+    {
+        @* overflow guard: long auto-names + the actions cell must scroll inside the
+           card rather than punch through its right edge *@
+        <div style="overflow-x:auto">
+        <table>
+            <thead><tr><th>Name</th><th>Microsoft</th><th>Google</th><th>Mode</th><th>Maps</th><th>Issues</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var p in Model)
+            {
+                <tr>
+                    <td style="word-break:break-word">@p.Name @(p.Enabled ? "" : Html.Raw("<span class='badge off'>paused</span>"))</td>
+                    <td class="muted">@p.M365Email</td>
+                    <td class="muted">@p.GoogleEmail</td>
+                    <td class="muted">@FriendlyDirection(p.Direction) · @(p.Fidelity == "busy_block" ? "busy-only" : "full detail")</td>
+                    <td>@p.Mappings</td>
+                    <td>@(p.OpenDeadLetters > 0 ? Html.Raw($"<span class='badge warn'>{p.OpenDeadLetters}</span>") : Html.Raw("—"))</td>
+                    <td style="white-space:nowrap">
+                        <form asp-action="SetEnabled" method="post" style="margin:0;display:inline-block">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="id" value="@p.PairID" />
+                            <input type="hidden" name="enabled" value="@((!p.Enabled).ToString().ToLower())" />
+                            <button class="btn btn-sm" type="submit">@(p.Enabled ? "Pause" : "Resume")</button>
+                        </form>
+                        <form asp-action="Remove" method="post" style="margin:0 0 0 6px;display:inline-block"
+                              onsubmit="return confirm('Remove this pair? Events it mirrored are deleted from the destination calendar; your original events are untouched.');">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="id" value="@p.PairID" />
+                            <button class="btn btn-sm" type="submit">Remove</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+        </div>
+    }
+</div>
+
+@if (isAdmin)
+{
+    <div class="card">
+        <h2>Operator: add an app-credential pair</h2>
+        <p class="muted">Uses the global Graph/Google app credentials (app_default), addressed by raw email — not user OAuth grants.</p>
+        <form asp-action="Add" method="post">
+            @Html.AntiForgeryToken()
+            <div class="field"><label>Name</label><input type="text" name="name" placeholder="work &lt;-&gt; family" /></div>
+            <div class="row">
+                <div class="field"><label>M365 email (mailbox)</label><input type="email" name="m365Email" required /></div>
+                <div class="field"><label>M365 calendar</label><input type="text" name="m365Cal" value="primary" /></div>
+            </div>
+            <div class="row">
+                <div class="field"><label>Google email (impersonated user)</label><input type="email" name="googleEmail" required /></div>
+                <div class="field"><label>Google calendar</label><input type="text" name="googleCal" value="primary" /></div>
+            </div>
+            <div class="row">
+                <div class="field"><label>Direction</label>
+                    <select name="direction">
+                        <option value="bidirectional">bidirectional</option>
+                        <option value="left_to_right">M365 → Google only</option>
+                        <option value="right_to_left">Google → M365 only</option>
+                    </select>
+                </div>
+                <div class="field"><label>Fidelity</label>
+                    <select name="fidelity"><option value="full_detail">full_detail</option><option value="busy_block">busy_block</option></select>
+                </div>
+                <div class="field"><label>Recurrence</label>
+                    <select name="recurrence"><option value="instance">instance (robust)</option><option value="series">series (RRULE)</option></select>
+                </div>
+            </div>
+            <button type="submit" class="btn">Create app-credential pair</button>
+        </form>
+    </div>
+}
+
+@functions {
+    private static string FriendlyDirection(string d) => d switch
+    {
+        "bidirectional" => "two-way",
+        "left_to_right" => "Microsoft → Google",
+        "right_to_left" => "Google → Microsoft",
+        _ => d
+    };
+}

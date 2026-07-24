@@ -1,0 +1,16 @@
+[Unit]
+Description=MT-CalSync sync scheduler tick (every minute)
+
+[Timer]
+# First run 2 min after boot, then every minute. Each tick runs only the pairs
+# whose nextRunAt has arrived (default cadence 5 min per pair, plus jitter and
+# failure backoff), so a quiet tick is one cheap DB query. Persistent catches up
+# a missed tick after downtime; systemd never overlaps a still-running oneshot,
+# and the per-pair lease lock guards besides.
+OnBootSec=2min
+OnUnitActiveSec=1min
+Persistent=true
+Unit=mtcalsync-worker@sync.service
+
+[Install]
+WantedBy=timers.target

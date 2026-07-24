@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- The public self-host portal: a single-operator admin UI over the Core engine.
+       References ONLY Core — no Saas, no billing, no multi-tenant identity. -->
+  <ItemGroup>
+    <ProjectReference Include="..\Core.MT-CalSync\Core.MT-CalSync.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>SelfHost.MTCalSync</RootNamespace>
+    <AssemblyName>SelfHost.MT-CalSync</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="settings.xml" CopyToOutputDirectory="PreserveNewest" Condition="Exists('settings.xml')" />
+    <None Update="settings.xml.example" CopyToOutputDirectory="PreserveNewest" Condition="Exists('settings.xml.example')" />
+  </ItemGroup>
+
+</Project>

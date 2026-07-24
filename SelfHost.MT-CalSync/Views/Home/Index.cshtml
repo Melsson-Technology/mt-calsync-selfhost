@@ -1,0 +1,75 @@
+@model HomeViewModel
+@{
+    ViewData["Title"] = "Dashboard";
+    string Badge(bool ok) => ok ? "ok" : "warn";
+}
+
+<h1>Dashboard</h1>
+<p class="muted" style="margin-bottom:16px">Configuration status and sync-pair health.</p>
+
+<div class="card">
+    <h2>Configuration</h2>
+    <div class="row">
+        <div>Database <span class="badge @(Model.DbOk?"ok":"warn")">@(Model.DbOk ? "connected" : "error")</span>
+            @if (!Model.DbOk) { <div class="muted">@Model.DbMessage</div> }
+        </div>
+        <div>Microsoft 365 <span class="badge @Badge(Model.GraphConfigured)">@(Model.GraphConfigured ? "configured" : "incomplete")</span></div>
+        <div>Google <span class="badge @Badge(Model.GoogleConfigured)">@(Model.GoogleConfigured ? "configured" : "incomplete")</span></div>
+        <div>SMTP <span class="badge @(Model.SmtpConfigured?"ok":"off")">@(Model.SmtpConfigured ? "configured" : "off")</span></div>
+    </div>
+    <div style="margin-top:16px">
+        <a class="btn" asp-controller="Settings" asp-action="Index">Edit credentials &amp; settings</a>
+        <form asp-action="Test" method="post" style="display:inline">
+            @Html.AntiForgeryToken()
+            <button type="submit" class="btn btn-primary">Test credentials (live)</button>
+        </form>
+        <span class="muted">Runs a live probe of Graph + Google + DB + SMTP.</span>
+    </div>
+</div>
+
+@if (Model.TestReport != null)
+{
+    <div class="card">
+        <h2>Test result <span class="badge @(Model.TestOk==true?"ok":"warn")">@(Model.TestOk==true ? "PASS" : "FAIL")</span></h2>
+        <pre class="report">@string.Join("\n", Model.TestReport)</pre>
+    </div>
+}
+
+<div class="card">
+    <h2>Sync pairs</h2>
+    @if (Model.Pairs.Count == 0)
+    {
+        <p class="muted">No pairs yet. <a asp-controller="Pairs" asp-action="Index">Add one</a> once credentials test green.</p>
+    }
+    else
+    {
+        <table>
+            <thead><tr><th>#</th><th>Name</th><th>M365</th><th>Google</th><th>Mode</th><th>Tokens</th><th>Last success</th><th>Maps</th><th>Dead</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var p in Model.Pairs)
+            {
+                <tr>
+                    <td>@p.PairID</td>
+                    <td>@p.Name @(p.Enabled ? "" : Html.Raw("<span class='badge off'>paused</span>"))</td>
+                    <td class="muted">@p.M365Email</td>
+                    <td class="muted">@p.GoogleEmail</td>
+                    <td class="muted">@p.Direction<br />@p.Fidelity / @p.Recurrence</td>
+                    <td>@(p.M365Token ? "M365✓" : "M365–") @(p.GoogleToken ? "G✓" : "G–")</td>
+                    <td class="muted">@p.LastSuccess</td>
+                    <td>@p.Mappings</td>
+                    <td>@(p.OpenDeadLetters > 0 ? Html.Raw($"<span class='badge warn'>{p.OpenDeadLetters}</span>") : Html.Raw("0"))</td>
+                    <td>
+                        <form asp-controller="Pairs" asp-action="SetEnabled" method="post" style="margin:0">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="id" value="@p.PairID" />
+                            <input type="hidden" name="enabled" value="@((!p.Enabled).ToString().ToLower())" />
+                            <button class="btn btn-sm" type="submit">@(p.Enabled ? "Pause" : "Resume")</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+    <div style="margin-top:12px"><a class="btn" asp-controller="Pairs" asp-action="Index">Manage pairs</a></div>
+</div>

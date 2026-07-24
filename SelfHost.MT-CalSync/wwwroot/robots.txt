@@ -1,0 +1,8 @@
+# Public marketing/legal pages are crawlable; the app itself is not.
+User-agent: *
+Allow: /$
+Allow: /pricing
+Allow: /privacy
+Allow: /terms
+Allow: /support
+Disallow: /

@@ -1,0 +1,52 @@
+@model SelfHost.MTCalSync.Models.MonitoringModel
+@{
+    ViewData["Title"] = "Monitoring";
+}
+
+<h1>Monitoring</h1>
+<p class="muted">Fleet-wide sync health and account counts.</p>
+
+@if (Model.Error.Length > 0)
+{
+    <div class="alert alert-danger">@Model.Error</div>
+}
+
+<div class="row" style="margin-bottom:18px">
+    <div class="card" style="flex:1"><h2>@Model.DuePairs</h2><span class="muted">pairs due now</span></div>
+    <div class="card" style="flex:1"><h2>@Model.ReauthAccounts</h2><span class="muted">accounts needing reconnect</span></div>
+    <div class="card" style="flex:1"><h2>@Model.OpenDeadLetters</h2><span class="muted">open dead letters</span></div>
+</div>
+
+<div class="card">
+    <h2>Pairs</h2>
+    @if (Model.Pairs.Count == 0)
+    {
+        <p class="muted">No pairs.</p>
+    }
+    else
+    {
+        <table>
+            <thead><tr><th>#</th><th>Name</th><th>Direction</th><th>Last run</th><th>Next run</th><th>Dead</th></tr></thead>
+            <tbody>
+            @foreach (var p in Model.Pairs)
+            {
+                <tr>
+                    <td>@p.PairID</td>
+                    <td>@p.Name @(p.Enabled ? "" : Html.Raw("<span class='badge off'>paused</span>"))</td>
+                    <td class="muted">@p.Direction</td>
+                    <td>
+                        @if (p.LastStatus.Length == 0) { <span class="muted">never</span> }
+                        else
+                        {
+                            <span class="badge @(p.LastStatus is "success" or "partial" ? "ok" : p.LastStatus is "skipped_auth" or "skipped_locked" ? "off" : "warn")">@p.LastStatus</span>
+                            <span class="muted">@(p.LastFinishedAt?.ToString("MM-dd HH:mm") ?? "")Z</span>
+                        }
+                    </td>
+                    <td class="muted">@(p.NextRunAt?.ToString("HH:mm:ss") ?? "asap")Z</td>
+                    <td>@(p.OpenDeadLetters > 0 ? Html.Raw($"<span class='badge warn'>{p.OpenDeadLetters}</span>") : Html.Raw("—"))</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+</div>

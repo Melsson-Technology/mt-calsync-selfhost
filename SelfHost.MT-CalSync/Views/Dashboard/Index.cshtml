@@ -1,0 +1,142 @@
+@using Core.MTCalSync
+@model SelfHost.MTCalSync.Models.DashboardViewModel
+@{
+    ViewData["Title"] = "Dashboard";
+}
+
+<h1>Dashboard</h1>
+<p class="muted">Signed in as @User.Identity?.Name</p>
+
+@if (Model.ReauthAccounts.Count > 0)
+{
+    <div class="card warn">
+        <strong>Reconnect needed:</strong>
+        @string.Join(", ", Model.ReauthAccounts.Select(a => a.principalEmail)) -
+        syncing for @(Model.ReauthAccounts.Count == 1 ? "this account" : "these accounts") is paused until you reconnect.
+        <a asp-controller="Connect" asp-action="Index">Reconnect now</a>
+    </div>
+}
+
+@if (Model.ShowSetupGuide)
+{
+    var current = !Model.GoogleConnected ? 1 : (!Model.MicrosoftConnected ? 2 : 3);
+    <div class="card">
+        <h2>Get started</h2>
+        <p class="muted">Connect both calendars, then create a sync pair - you'll be live in a couple of minutes.</p>
+        <ol class="steps">
+
+            <li class="step @(Model.GoogleConnected ? "done" : current == 1 ? "current" : "todo")">
+                <span class="step-num">@(Model.GoogleConnected ? "✓" : "1")</span>
+                <div class="step-body">
+                    <div class="step-title">Connect your Google calendar</div>
+                    <p class="step-desc">Sign in with Google and grant calendar access.</p>
+                    @if (!Model.GoogleConnected)
+                    {
+                        <div class="step-cta">
+                            <a class="btn @(current == 1 ? "btn-primary" : "")"
+                               asp-controller="Connect" asp-action="Start"
+                               asp-route-provider="google" asp-route-returnTo="/Dashboard">Connect Google</a>
+                        </div>
+                    }
+                </div>
+            </li>
+
+            <li class="step @(Model.MicrosoftConnected ? "done" : current == 2 ? "current" : "todo")">
+                <span class="step-num">@(Model.MicrosoftConnected ? "✓" : "2")</span>
+                <div class="step-body">
+                    <div class="step-title">Connect your Microsoft calendar</div>
+                    <p class="step-desc">Sign in with Microsoft 365 / Outlook and grant calendar access.</p>
+                    @if (!Model.MicrosoftConnected)
+                    {
+                        <div class="step-cta">
+                            <a class="btn @(current == 2 ? "btn-primary" : "")"
+                               asp-controller="Connect" asp-action="Start"
+                               asp-route-provider="microsoft" asp-route-returnTo="/Dashboard">Connect Microsoft</a>
+                        </div>
+                    }
+                </div>
+            </li>
+
+            <li class="step @(current == 3 ? "current" : "todo")">
+                <span class="step-num">3</span>
+                <div class="step-body">
+                    <div class="step-title">Create your first sync pair</div>
+                    <p class="step-desc">
+                        @(Model.BothProvidersConnected
+                            ? "Pick which calendars mirror each other, and how."
+                            : "Available once both calendars above are connected.")
+                    </p>
+                    @if (Model.BothProvidersConnected)
+                    {
+                        <div class="step-cta">
+                            <a class="btn btn-primary" asp-controller="Pairs" asp-action="Create">Create sync pair</a>
+                        </div>
+                    }
+                </div>
+            </li>
+
+        </ol>
+    </div>
+}
+
+<div class="card">
+    <h2>Connected accounts</h2>
+    @if (Model.Accounts.Count == 0)
+    {
+        <p class="muted">Connect your Google and Microsoft accounts, then pick which calendars sync where.</p>
+        <a class="btn btn-primary" asp-controller="Connect" asp-action="Index">Connect accounts</a>
+    }
+    else
+    {
+        <table>
+            <tr><th>Provider</th><th>Account</th><th>Status</th></tr>
+            @foreach (var a in Model.Accounts)
+            {
+                <tr>
+                    <td>@(a.provider == Providers.Google ? "Google" : "Microsoft")</td>
+                    <td>@a.principalEmail</td>
+                    <td>
+                        @if (a.isConnected) { <span class="badge ok">connected</span> }
+                        else { <span class="badge warn">needs reconnect</span> }
+                    </td>
+                </tr>
+            }
+        </table>
+        <p style="margin-bottom:0"><a class="btn btn-sm" asp-controller="Connect" asp-action="Index">Manage accounts</a></p>
+    }
+</div>
+
+<div class="card">
+    <h2>Sync pairs</h2>
+    @if (Model.Pairs.Count == 0)
+    {
+        <p class="muted">No pairs yet - once both accounts are connected, create one to start syncing.</p>
+        <a class="btn btn-primary" asp-controller="Pairs" asp-action="Create">New sync pair</a>
+    }
+    else
+    {
+        <table>
+            <tr><th>Pair</th><th>Last run</th><th>Maps</th><th>Issues</th></tr>
+            @foreach (var p in Model.Pairs)
+            {
+                <tr>
+                    <td>@p.Name @(p.Enabled ? "" : Html.Raw("<span class='badge off'>paused</span>"))</td>
+                    <td class="muted">@p.LastSuccess</td>
+                    <td>@p.Mappings</td>
+                    <td>@(p.OpenDeadLetters > 0 ? Html.Raw($"<span class='badge warn'>{p.OpenDeadLetters}</span>") : Html.Raw("-"))</td>
+                </tr>
+            }
+        </table>
+        <p style="margin-bottom:0"><a class="btn btn-sm" asp-controller="Pairs" asp-action="Index">Manage pairs</a></p>
+    }
+</div>
+
+@if (Model.IsAdmin)
+{
+    <div class="card">
+        <h2>Operator</h2>
+        <p class="muted">You're an administrator on this install.</p>
+        <a class="btn" asp-controller="Home" asp-action="Index">System dashboard</a>
+        <a class="btn" asp-controller="Settings" asp-action="Index">Settings</a>
+    </div>
+}
