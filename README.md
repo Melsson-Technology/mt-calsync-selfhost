@@ -45,7 +45,9 @@ Prerequisites on the server: **.NET 8 ASP.NET runtime**, **MySQL or MariaDB**, a
 optionally **nginx** for TLS. Full steps are in [_docs/INSTALL.md](_docs/INSTALL.md).
 
 ```bash
-# 1. On your workstation: build a release bundle
+# 1. On your workstation: clone and build a release bundle
+git clone https://github.com/Melsson-Technology/mt-calsync-selfhost.git
+cd mt-calsync-selfhost
 pwsh ./scripts/build-and-package.ps1          # -> build/mtcalsync-engine.tar.gz
 
 # 2. On the server (as root): provision, deploy, load the schema
@@ -77,6 +79,17 @@ mtcs sync --pair 1 --dry-run
 dotnet build MT-CalSync.Engine.sln           # engine solution
 dotnet run --project SelfHost.MT-CalSync     # portal on http://localhost:5091
 ```
+
+## Issues, security, and changes
+
+- **Bugs, questions, feature requests** — [open an issue](https://github.com/Melsson-Technology/mt-calsync-selfhost/issues).
+  They are very welcome and need no paperwork. See [CONTRIBUTING.md](CONTRIBUTING.md) for
+  how the repository is laid out and why pull requests are not open yet.
+- **Security issues** — please do not open a public issue. Email
+  security@melssontechnology.com; [SECURITY.md](SECURITY.md) sets out the threat model and
+  what to expect.
+- **What changed between releases** — [CHANGELOG.md](CHANGELOG.md). This repository is
+  published as a release log rather than a commit history, so the changelog is the record.
 
 ## License
 

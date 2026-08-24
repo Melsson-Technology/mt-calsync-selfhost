@@ -1,0 +1,32 @@
+# Normalize line endings so a repository developed on Windows still works on Linux.
+#
+# The rule that matters is the one for *.sh: a shell script checked out with CRLF fails on
+# Linux with "bad interpreter: /usr/bin/env bash^M", which is a confusing way to discover a
+# line-ending problem. The deploy scripts run on the server, so they must be LF regardless
+# of who committed them or from which platform.
+
+# Store everything as LF in the repository; check out native on Windows unless overridden.
+* text=auto
+
+# Always LF - executed by Linux shells or read by Linux tooling.
+*.sh          text eol=lf
+*.service     text eol=lf
+*.timer       text eol=lf
+*.conf        text eol=lf
+*.sample      text eol=lf
+*.example     text eol=lf
+*.sql         text eol=lf
+*.yml         text eol=lf
+*.yaml        text eol=lf
+
+# Always CRLF - PowerShell on Windows is happiest this way and never runs on a Linux shell.
+*.ps1         text eol=crlf
+
+# Explicit text types (helps diffing and avoids mis-detection).
+*.cs          text
+*.cshtml      text
+*.csproj      text
+*.sln         text
+*.json        text
+*.md          text
+*.xml         text
