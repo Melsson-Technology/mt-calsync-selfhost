@@ -43,7 +43,7 @@
                         }
                     </td>
                     <td class="muted">@(p.NextRunAt?.ToString("HH:mm:ss") ?? "asap")Z</td>
-                    <td>@(p.OpenDeadLetters > 0 ? Html.Raw($"<span class='badge warn'>{p.OpenDeadLetters}</span>") : Html.Raw("—"))</td>
+                    <td>@(p.OpenDeadLetters > 0 ? Html.Raw($"<span class='badge warn'>{p.OpenDeadLetters}</span>") : Html.Raw("0"))</td>
                 </tr>
             }
             </tbody>

@@ -22,13 +22,13 @@
             @(!msConfigured ? "Microsoft connections aren't available yet." : "")
         </p>
     }
-    <p class="muted">You'll sign in with the provider and grant calendar access — we never see your password.
+    <p class="muted">You'll sign in with the provider and grant calendar access. We never see your password.
         You can disconnect at any time, which deletes the stored access tokens.</p>
     @if ((bool)(ViewBag.UnverifiedAppNotice ?? false))
     {
         <p class="muted">Heads-up: while our app verification with Google and Microsoft is in progress, their
             consent screens may show an "unverified app" warning. Review the requested calendar permissions
-            and continue via "Advanced" if you're comfortable — the access requested is calendar-only either way.</p>
+            and continue via "Advanced" if you're comfortable. The access requested is calendar-only either way.</p>
     }
 </div>
 

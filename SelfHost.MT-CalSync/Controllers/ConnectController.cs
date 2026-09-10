@@ -67,7 +67,7 @@ namespace SelfHost.MTCalSync.Controllers
 			catch (Exception ex)
 			{
 				Common.writeToLog("ERROR Connect.Calendars:", ex);
-				ViewBag.Error = "Couldn't list calendars right now — try again shortly.";
+				ViewBag.Error = "Couldn't list calendars right now. Try again shortly.";
 				ViewBag.Calendars = new List<RemoteCalendar>();
 			}
 			return View();
@@ -114,17 +114,17 @@ namespace SelfHost.MTCalSync.Controllers
 		public async Task<IActionResult> GoogleCallback(string? code, string? state, string? error)
 		{
 			var payload = ValidateState(state, Providers.Google);
-			if (payload == null) return CallbackFailed("The sign-in link expired — please try connecting again.");
+			if (payload == null) return CallbackFailed("The sign-in link expired. Please try connecting again.");
 			if (!string.IsNullOrEmpty(error) || string.IsNullOrEmpty(code))
 				return CallbackFailed(FriendlyProviderError(error));
 
 			var tokens = await GoogleOAuthFlow.ExchangeCodeAsync(code, payload.v, RedirectUri(Providers.Google));
-			if (!tokens.Ok) return CallbackFailed("Google sign-in failed — please try again.");
+			if (!tokens.Ok) return CallbackFailed("Google sign-in failed. Please try again.");
 			if (string.IsNullOrEmpty(tokens.RefreshToken))
 				return CallbackFailed("Google didn't issue offline access. Remove MT-CalSync from your Google account's third-party access list and connect again.");
 
 			var claims = GoogleOAuthFlow.ParseIdToken(tokens.IdToken);
-			if (string.IsNullOrEmpty(claims.Subject)) return CallbackFailed("Google sign-in failed — please try again.");
+			if (string.IsNullOrEmpty(claims.Subject)) return CallbackFailed("Google sign-in failed. Please try again.");
 
 			return UpsertAccount(payload, Providers.Google, claims.Subject, tenantId: string.Empty,
 				email: claims.Email, displayName: claims.Email, GoogleOAuthFlow.Scopes,
@@ -136,17 +136,17 @@ namespace SelfHost.MTCalSync.Controllers
 		public async Task<IActionResult> MicrosoftCallback(string? code, string? state, string? error, string? error_description)
 		{
 			var payload = ValidateState(state, Providers.M365);
-			if (payload == null) return CallbackFailed("The sign-in link expired — please try connecting again.");
+			if (payload == null) return CallbackFailed("The sign-in link expired. Please try connecting again.");
 			if (!string.IsNullOrEmpty(error) || string.IsNullOrEmpty(code))
 				return CallbackFailed(FriendlyProviderError(error, error_description));
 
 			var tokens = await MsOAuthFlow.ExchangeCodeAsync(code, payload.v, RedirectUri(Providers.M365));
-			if (!tokens.Ok) return CallbackFailed("Microsoft sign-in failed — please try again.");
+			if (!tokens.Ok) return CallbackFailed("Microsoft sign-in failed. Please try again.");
 			if (string.IsNullOrEmpty(tokens.RefreshToken))
-				return CallbackFailed("Microsoft didn't issue offline access — please try connecting again.");
+				return CallbackFailed("Microsoft didn't issue offline access. Please try connecting again.");
 
 			var claims = MsOAuthFlow.ParseIdToken(tokens.IdToken);
-			if (string.IsNullOrEmpty(claims.ObjectId)) return CallbackFailed("Microsoft sign-in failed — please try again.");
+			if (string.IsNullOrEmpty(claims.ObjectId)) return CallbackFailed("Microsoft sign-in failed. Please try again.");
 
 			return UpsertAccount(payload, Providers.M365, claims.ObjectId, claims.TenantId,
 				claims.Email, string.IsNullOrEmpty(claims.Name) ? claims.Email : claims.Name, MsOAuthFlow.Scopes,
@@ -251,12 +251,12 @@ namespace SelfHost.MTCalSync.Controllers
 
 		private static string FriendlyProviderError(string? error, string? description = null)
 		{
-			if (error == "access_denied") return "You cancelled the connection — nothing was changed.";
+			if (error == "access_denied") return "You cancelled the connection. Nothing was changed.";
 			// Tenant-admin consent blocks (Entra) deserve a specific explanation.
 			if ((description ?? string.Empty).Contains("AADSTS65001") || (description ?? string.Empty).Contains("AADSTS650052") ||
 				(description ?? string.Empty).Contains("AADSTS90094"))
 				return "Your organization requires admin approval for new apps, and this app hasn't been approved yet. Ask your Microsoft 365 admin, or connect a personal/work account from a tenant that allows user consent.";
-			return "The provider reported an error — please try connecting again.";
+			return "The provider reported an error. Please try connecting again.";
 		}
 
 		private string RedirectUri(string provider)

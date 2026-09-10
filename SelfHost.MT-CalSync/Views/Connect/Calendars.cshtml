@@ -2,7 +2,7 @@
 @{
     var account = (OAuthAccount)ViewBag.Account;
     var calendars = (IReadOnlyList<RemoteCalendar>)ViewBag.Calendars;
-    ViewData["Title"] = "Calendars — " + account.principalEmail;
+    ViewData["Title"] = "Calendars: " + account.principalEmail;
 }
 
 <h1>Calendars</h1>

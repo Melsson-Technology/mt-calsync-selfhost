@@ -24,7 +24,7 @@ else
                 <div class="field">
                     <label>Source calendar</label>
                     <select name="sourceKey" required>
-                        <option value="">— choose —</option>
+                        <option value="">Choose a calendar</option>
                         @foreach (var a in Model.Accounts.Where(x => x.Calendars.Count > 0))
                         {
                             <optgroup label="@(a.Account.provider == "google" ? "Google" : "Microsoft") · @a.Account.principalEmail">
@@ -41,7 +41,7 @@ else
                 <div class="field">
                     <label>Destination calendar</label>
                     <select name="destKey" required>
-                        <option value="">— choose —</option>
+                        <option value="">Choose a calendar</option>
                         @foreach (var a in Model.Accounts.Where(x => x.Calendars.Count > 0))
                         {
                             <optgroup label="@(a.Account.provider == "google" ? "Google" : "Microsoft") · @a.Account.principalEmail">
@@ -68,7 +68,7 @@ else
                     <label>What gets copied</label>
                     <select name="mode" id="modeSelect">
                         <option value="full">Full details (title, time, location, notes)</option>
-                        <option value="busy">Busy only (opaque “Busy” blocks — hides details)</option>
+                        <option value="busy">Busy only (opaque “Busy” blocks that hide details)</option>
                     </select>
                 </div>
             </div>

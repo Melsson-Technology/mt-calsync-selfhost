@@ -23,7 +23,7 @@
     <h2>@(showAll ? "All pairs" : "Your pairs")</h2>
     @if (Model.Count == 0)
     {
-        <p class="muted">None yet — create your first pair once both accounts are connected.</p>
+        <p class="muted">None yet. Create your first pair once both accounts are connected.</p>
     }
     else
     {
@@ -41,7 +41,7 @@
                     <td class="muted">@p.GoogleEmail</td>
                     <td class="muted">@FriendlyDirection(p.Direction) · @(p.Fidelity == "busy_block" ? "busy-only" : "full detail")</td>
                     <td>@p.Mappings</td>
-                    <td>@(p.OpenDeadLetters > 0 ? Html.Raw($"<span class='badge warn'>{p.OpenDeadLetters}</span>") : Html.Raw("—"))</td>
+                    <td>@(p.OpenDeadLetters > 0 ? Html.Raw($"<span class='badge warn'>{p.OpenDeadLetters}</span>") : Html.Raw("0"))</td>
                     <td style="white-space:nowrap">
                         <form asp-action="SetEnabled" method="post" style="margin:0;display:inline-block">
                             @Html.AntiForgeryToken()
@@ -68,7 +68,7 @@
 {
     <div class="card">
         <h2>Operator: add an app-credential pair</h2>
-        <p class="muted">Uses the global Graph/Google app credentials (app_default), addressed by raw email — not user OAuth grants.</p>
+        <p class="muted">Uses the global Graph/Google app credentials (app_default), addressed by raw email, not user OAuth grants.</p>
         <form asp-action="Add" method="post">
             @Html.AntiForgeryToken()
             <div class="field"><label>Name</label><input type="text" name="name" placeholder="work &lt;-&gt; family" /></div>

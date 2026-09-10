@@ -5,7 +5,7 @@
 
 <h1>Credentials &amp; configuration</h1>
 <p class="muted" style="margin-bottom:18px">
-    Everything the sync worker needs. Secrets are stored AES-encrypted and never shown back —
+    Everything the sync worker needs. Secrets are stored AES-encrypted and never shown back,
     only a masked status. Leave a secret field blank to keep the stored value. Plain settings
     are saved to the database and take effect on the next sync (no redeploy).
 </p>
@@ -14,7 +14,7 @@
     @Html.AntiForgeryToken()
 
     <div class="card">
-        <h2>Microsoft 365 (Graph — app-only)</h2>
+        <h2>Microsoft 365 (Graph, app-only)</h2>
         <div class="muted" style="margin:-6px 0 14px">
             Entra app registration with the <code>Calendars.ReadWrite</code> <em>application</em> permission (admin-consented).
         </div>
@@ -56,8 +56,8 @@
             <div class="field">
                 <label>Fidelity</label>
                 <select asp-for="FidelityMode">
-                    <option value="full_detail">full_detail — copy title/location/notes</option>
-                    <option value="busy_block">busy_block — opaque "Busy"</option>
+                    <option value="full_detail">full_detail: copy title/location/notes</option>
+                    <option value="busy_block">busy_block: opaque "Busy"</option>
                 </select>
             </div>
             <div class="field" style="align-self:end">

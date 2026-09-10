@@ -97,10 +97,10 @@ namespace SelfHost.MTCalSync.Controllers
 		{
 			if (string.IsNullOrWhiteSpace(v)) return "not set";
 			string last4 = v.Length >= 4 ? v.Substring(v.Length - 4) : v;
-			return "configured — ••••" + last4;
+			return "configured: ••••" + last4;
 		}
 
 		private static string JsonStatus(string v) =>
-			string.IsNullOrWhiteSpace(v) ? "not set" : $"configured — {v.Length} chars";
+			string.IsNullOrWhiteSpace(v) ? "not set" : $"configured: {v.Length} chars";
 	}
 }

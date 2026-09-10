@@ -58,13 +58,13 @@ namespace SelfHost.MTCalSync.Controllers
 			if (source == null || dest == null)
 				return await WizardFailed("Pick a source and a destination calendar.");
 			if (source.Value.account.provider == dest.Value.account.provider)
-				return await WizardFailed("Pick one Google calendar and one Microsoft calendar — pairs sync across the two providers.");
+				return await WizardFailed("Pick one Google calendar and one Microsoft calendar. Pairs sync across the two providers.");
 
 			// Soft write-access check on the destination (skip silently if the
 			// provider listing is unavailable; the first sync surfaces real errors).
 			string? destRole = await LookupAccessRole(dest.Value.account, dest.Value.calendarId);
 			if (destRole is "reader" or "freeBusyReader")
-				return await WizardFailed("You only have read access to the destination calendar — pick one you can edit, or flip the direction.");
+				return await WizardFailed("You only have read access to the destination calendar. Pick one you can edit, or flip the direction.");
 
 			// Engine convention: left = m365, right = google, direction carries flow.
 			var (msSide, googleSide) = source.Value.account.provider == Providers.M365 ? (source.Value, dest.Value) : (dest.Value, source.Value);
@@ -89,7 +89,7 @@ namespace SelfHost.MTCalSync.Controllers
 			};
 			connR.ensure();
 			if (connL.connectionID == 0 || connR.connectionID == 0)
-				return await WizardFailed("Something went wrong saving the calendar selection — try again.");
+				return await WizardFailed("Something went wrong saving the calendar selection. Try again.");
 
 			string arrow = flow == "twoway" ? " ⇄ " : " → ";
 			var pair = new SyncPair
@@ -112,10 +112,10 @@ namespace SelfHost.MTCalSync.Controllers
 				enabled = true
 			};
 			if (pair.insert() == 0)
-				return await WizardFailed("Something went wrong creating the pair — try again.");
+				return await WizardFailed("Something went wrong creating the pair. Try again.");
 
 			Common.audit($"pair-created pair={pair.pairID} user={userId} direction={direction} mode={pair.fidelityMode}");
-			TempData["Info"] = $"Pair created — the first sync runs within about 5 minutes. ({pair.name})";
+			TempData["Info"] = $"Pair created. The first sync runs within about 5 minutes. ({pair.name})";
 			return RedirectToAction("Index");
 		}
 
