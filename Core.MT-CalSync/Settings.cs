@@ -44,10 +44,9 @@ namespace Core.MTCalSync
 				// Sync defaults (per-pair values in sync_pair override these)
 				"WindowDays", "LookbackDays", "FidelityMode", "CopyAttendeesToBody",
 				"MaxWritesPerRun", "FullResyncHour", "MaxDeltaPages",
-				// Plan / signup / worker / billing
-				"TrialDays", "PlanCalendarCap", "PublicBaseUrl", "WorkerMaxConcurrency",
-				"StripePublishableKey", "StripeSecretKey",
-				"PlanPriceMonthly", "PlanPriceAnnual", "AbandonedTrialRetentionDays",
+				// Worker / billing (the plan's own numbers are constants, not settings — see Plan.cs)
+				"PublicBaseUrl", "WorkerMaxConcurrency",
+				"StripePublishableKey", "StripeSecretKey", "AbandonedTrialRetentionDays",
 				// Provenance stamp namespace + this app's instance id
 				"ExtPropNamespaceGuid", "AppInstanceId",
 				// SMTP (failure alerts)
@@ -148,17 +147,16 @@ namespace Core.MTCalSync
 		public static int FullResyncHour => (int)parseDecimal(resolveRaw("FullResyncHour"), 3m);
 		public static int MaxDeltaPages => (int)parseDecimal(resolveRaw("MaxDeltaPages"), 50m);
 
-		// ─── Plan / signup ──────────────────────────────────────────────────
-		public static int TrialDays => (int)parseDecimal(resolveRaw("TrialDays"), 14m);
-		public static int PlanCalendarCap => (int)parseDecimal(resolveRaw("PlanCalendarCap"), 10m);
+		// ─── Worker ─────────────────────────────────────────────────────────
+		// Trial length, plan price and the calendar allowance are deliberately NOT
+		// settings. They are compile-time facts in the SaaS layer's Plan.cs, because
+		// changing one also changes marketing prose that no settings row can reach.
 		// Concurrent pair runs per worker tick — sized to the box, not the tenant count.
 		public static int WorkerMaxConcurrency => (int)parseDecimal(resolveRaw("WorkerMaxConcurrency"), 2m);
 
 		// ─── Billing (Stripe) ───────────────────────────────────────────────
 		public static string StripePublishableKey => resolveRaw("StripePublishableKey");
 		public static string EffectiveStripeSecretKey => resolveKey("StripeSecretKey", GetCachedSetting("StripeSecretKey"));
-		public static decimal PlanPriceMonthly => parseDecimal(resolveRaw("PlanPriceMonthly"), 4m);
-		public static decimal PlanPriceAnnual => parseDecimal(resolveRaw("PlanPriceAnnual"), 40m);
 		// Days after an unconverted trial's end before stored OAuth tokens are
 		// revoked/deleted (holding live credentials for abandoned trials is pure risk).
 		public static int AbandonedTrialRetentionDays => (int)parseDecimal(resolveRaw("AbandonedTrialRetentionDays"), 30m);
