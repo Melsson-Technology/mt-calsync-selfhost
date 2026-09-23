@@ -31,7 +31,7 @@ provider ──delta──▶  SyncEngine  ──stamped mirror──▶ provide
                      (Core)
    Worker.MT-CalSync  — CLI + the systemd-timer sync tick
    SelfHost.MT-CalSync — single-operator admin portal (Settings, Connect, Pairs, Dashboard)
-   MySQL / MariaDB     — pairs, mappings, tokens, run history
+   MySQL 8             — pairs, mappings, tokens, run history
 ```
 
 The worker wakes on a timer, pulls changes from each side, classifies them
@@ -41,8 +41,8 @@ read-only reflection of exactly one origin event.
 
 ## Quick start (self-host)
 
-Prerequisites on the server: **.NET 8 ASP.NET runtime**, **MySQL or MariaDB**, and
-optionally **nginx** for TLS. Full steps are in [_docs/INSTALL.md](_docs/INSTALL.md).
+Prerequisites on the server: **.NET 8 ASP.NET runtime**, **MySQL 8.0 or later** (not
+MariaDB), and optionally **nginx** for TLS. Full steps are in [_docs/INSTALL.md](_docs/INSTALL.md).
 
 ```bash
 # 1. On your workstation: clone, build a release bundle, and copy it to the server

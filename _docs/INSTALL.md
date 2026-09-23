@@ -1,7 +1,7 @@
 # Installing MT-CalSync (self-host)
 
 MT-CalSync runs as a systemd worker (the sync tick) plus a small Kestrel admin
-portal, backed by MySQL/MariaDB. It's a framework-dependent .NET 8 app.
+portal, backed by MySQL 8. It's a framework-dependent .NET 8 app.
 
 ## 1. Server prerequisites
 
@@ -11,7 +11,7 @@ Debian/Ubuntu example:
 # .NET 8 ASP.NET runtime (see https://learn.microsoft.com/dotnet for your distro)
 sudo apt-get install -y aspnetcore-runtime-8.0
 # Database
-sudo apt-get install -y mariadb-server         # or mysql-server
+sudo apt-get install -y mysql-server           # MySQL 8.0 or later; MariaDB is not supported
 # Optional: TLS-terminating reverse proxy
 sudo apt-get install -y nginx certbot python3-certbot-nginx
 ```

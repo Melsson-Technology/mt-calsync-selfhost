@@ -18,6 +18,32 @@ their entry.
 - `.gitattributes` normalising line endings, so shell scripts checked out on Windows still
   run on the Linux server.
 
+## [2026-09-23] - the self-host install, made to work as written
+
+### Fixed
+
+- **`provision.sh` created a database user the app could never connect as.** The user was
+  created `IDENTIFIED WITH auth_socket`, and the connection string it wrote had no password.
+  MySql.Data connects over TCP for `Server=localhost`, and socket authentication only works over
+  the Unix socket, so the first query failed. The `CREATE USER` error was also suppressed, so
+  provisioning reported success. The user now authenticates with a generated password
+  (`caching_sha2_password`) over `127.0.0.1` with TLS required. That is the arrangement the
+  hosted service runs on. The script proves the connection the way the app will make it before
+  it finishes. **Re-running it repairs an install made by the old version:** it converts the
+  account and rewrites only the connection string, keeping `DataEncryptionKey` byte-for-byte.
+- **`set-admin-password`, `set-secret` and `migrate-secrets` reported success for values never
+  saved.** A failed database write was logged and swallowed, and the command still printed
+  "Self-host operator password set." and exited 0. On a broken install that meant a password
+  that could never sign in, with nothing saying why. They now say what failed and exit 1.
+- **MariaDB is refused rather than half-configured.** The engine is built and run against
+  MySQL 8 through Oracle's MySql.Data. The docs had offered "MySQL or MariaDB", and INSTALL.md's
+  example installed MariaDB. `provision.sh` now stops on MariaDB, or on MySQL older than 8.0,
+  with a message saying what to install.
+- **The quick start failed at step 2.** The deploy scripts were not executable. `load-schema.sh`
+  was run from a directory nothing puts it in. The steps never unpacked the bundle they ran
+  scripts from. `mtcs` was used before it was defined, and `dotnet run` was documented on :5091
+  while binding :5000. All are fixed, in the README and in INSTALL.md.
+
 ## [2026-07-24] - sync correctness
 
 ### Fixed

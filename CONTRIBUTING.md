@@ -44,7 +44,7 @@ much as it is written for future contributors.
 
 ## Getting started
 
-You need a **.NET 8 SDK** and a **MySQL or MariaDB** you can throw away.
+You need a **.NET 8 SDK** and a **MySQL 8** database you can throw away.
 
 ```bash
 git clone https://github.com/Melsson-Technology/mt-calsync-selfhost.git

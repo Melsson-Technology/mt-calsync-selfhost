@@ -387,23 +387,40 @@ namespace Core.MTCalSync
 		}
 
 		// Encrypt a secret and store it in the DB settings table (DB-first resolution).
-		public static void SetSecret(string name, string value)
+		// Returns false, having said why, if nothing was stored.
+		public static bool SetSecret(string name, string value)
 		{
-			if (string.IsNullOrWhiteSpace(name) || value == null) { Console.WriteLine("Usage: set-secret <name> <value>"); return; }
+			if (string.IsNullOrWhiteSpace(name) || value == null) { Console.WriteLine("Usage: set-secret <name> <value>"); return false; }
 			string enc = Encryption.Encrypt(value);
-			new Settings().saveByName(name, enc);
+			if (!TrySave(name, enc)) return false;
 			Console.WriteLine($"Stored encrypted setting '{name}' ({enc.Length} chars). It overrides the settings.xml value.");
+			return true;
 		}
 
 		// Set the self-host portal's single operator password (PBKDF2 hash stored in the
 		// settings table). The self-host portal reads Settings.SelfHostAdminPasswordHash.
-		public static void SetAdminPassword(string password)
+		// Returns false, having said why, if the password was not stored.
+		public static bool SetAdminPassword(string password)
 		{
-			if (string.IsNullOrWhiteSpace(password)) { Console.WriteLine("Usage: set-admin-password --password <value>"); return; }
+			if (string.IsNullOrWhiteSpace(password)) { Console.WriteLine("Usage: set-admin-password --password <value>"); return false; }
 			string weak = PasswordHasher.CheckStrength(password);
-			if (weak.Length > 0) { Console.WriteLine(weak); return; }
-			new Settings().saveByName("SelfHostAdminPasswordHash", PasswordHasher.Hash(password));
+			if (weak.Length > 0) { Console.WriteLine(weak); return false; }
+			if (!TrySave("SelfHostAdminPasswordHash", PasswordHasher.Hash(password))) return false;
 			Console.WriteLine("Self-host operator password set.");
+			return true;
+		}
+
+		// saveByName reports failure through errorMessage rather than by throwing, so a caller
+		// that does not look at it announces success for a value that was never stored. The
+		// self-host quick start did exactly that against a database it could not reach: it printed
+		// "Self-host operator password set.", and then no sign-in could ever work.
+		private static bool TrySave(string name, string value)
+		{
+			var settings = new Settings();
+			settings.saveByName(name, value);
+			if (string.IsNullOrEmpty(settings.errorMessage)) return true;
+			Console.WriteLine($"Could not save '{name}' to the database: {settings.errorMessage}");
+			return false;
 		}
 
 		// Dismantle mirror-of-mirror chains: a fresh pair's first sync reads deltas,
@@ -523,13 +540,13 @@ namespace Core.MTCalSync
 
 		// Re-encrypt legacy-format secrets in the settings table under the current
 		// DataEncryptionKey (v2 AES-GCM). Safe to re-run; skips values already v2.
-		public static void MigrateSecrets()
+		public static bool MigrateSecrets()
 		{
 			if (string.IsNullOrWhiteSpace(Settings.DataEncryptionKey))
-			{ Console.WriteLine("DataEncryptionKey is not set in settings.xml — aborting."); return; }
+			{ Console.WriteLine("DataEncryptionKey is not set in settings.xml — aborting."); return false; }
 
 			string[] secretNames = { "GraphClientSecret", "SmtpPassword", "GoogleServiceAccountJson" };
-			int migrated = 0, skipped = 0;
+			int migrated = 0, skipped = 0, failed = 0;
 			foreach (var name in secretNames)
 			{
 				var row = new Settings().getByName(name);
@@ -538,7 +555,7 @@ namespace Core.MTCalSync
 				try
 				{
 					string plain = Encryption.Decrypt(row.settingValue);   // legacy path
-					new Settings().saveByName(name, Encryption.Encrypt(plain));
+					if (!TrySave(name, Encryption.Encrypt(plain))) { failed++; continue; }
 					Console.WriteLine($"{name}: migrated to v2.");
 					migrated++;
 				}
@@ -546,9 +563,11 @@ namespace Core.MTCalSync
 				{
 					Console.WriteLine($"{name}: FAILED to migrate — {ex.Message}");
 					Common.writeToLog($"ERROR MigrateSecrets({name}):", ex);
+					failed++;
 				}
 			}
-			Console.WriteLine($"Done. {migrated} migrated, {skipped} skipped.");
+			Console.WriteLine($"Done. {migrated} migrated, {skipped} skipped, {failed} failed.");
+			return failed == 0;
 		}
 
 		private static string Fmt(DateTime? dt) => dt.HasValue ? dt.Value.ToString("yyyy-MM-dd HH:mm 'UTC'") : "never";

@@ -111,13 +111,13 @@ namespace Worker.MTCalSync
 
 					case "set-secret":
 						if (args.Length < 3) { Console.WriteLine("Usage: set-secret <name> <value>"); return 1; }
-						CliCommands.SetSecret(args[1], args[2]); return 0;
+						return CliCommands.SetSecret(args[1], args[2]) ? 0 : 1;
 
 					case "set-admin-password":
-						CliCommands.SetAdminPassword(a.Str("password")); return 0;
+						return CliCommands.SetAdminPassword(a.Str("password")) ? 0 : 1;
 
 					case "migrate-secrets":
-						CliCommands.MigrateSecrets(); return 0;
+						return CliCommands.MigrateSecrets() ? 0 : 1;
 
 					default:
 						Console.WriteLine($"Unknown command: {cmd}"); Usage(); return 1;
