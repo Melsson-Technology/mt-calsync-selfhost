@@ -61,7 +61,7 @@ systemctl enable mtcalsync-sync.timer mtcalsync-selfhost.service
 echo
 echo "Provisioned. Next:"
 echo "  1) Deploy binaries to $APP_HOME (see build-and-package.ps1 + deploy-on-server.sh)."
-echo "  2) sudo $APP_HOME/scripts/load-schema.sh $DB_NAME"
+echo "  2) sudo bash $APP_HOME/deploy/load-schema.sh $DB_NAME"
 echo "  3) mtcs set-admin-password --password <value>   # the portal operator login"
 echo "  4) systemctl start mtcalsync-selfhost.service && systemctl start mtcalsync-sync.timer"
 echo "  5) Open the portal, enter your provider credentials in Settings, connect calendars."

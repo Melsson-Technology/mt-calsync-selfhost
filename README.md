@@ -45,26 +45,29 @@ Prerequisites on the server: **.NET 8 ASP.NET runtime**, **MySQL or MariaDB**, a
 optionally **nginx** for TLS. Full steps are in [_docs/INSTALL.md](_docs/INSTALL.md).
 
 ```bash
-# 1. On your workstation: clone and build a release bundle
+# 1. On your workstation: clone, build a release bundle, and copy it to the server
 git clone https://github.com/Melsson-Technology/mt-calsync-selfhost.git
 cd mt-calsync-selfhost
 pwsh ./scripts/build-and-package.ps1          # -> build/mtcalsync-engine.tar.gz
+scp build/mtcalsync-engine.tar.gz user@server:/tmp/
 
-# 2. On the server (as root): provision, deploy, load the schema
-sudo ./deploy/provision.sh
-sudo ./deploy/deploy-on-server.sh mtcalsync-engine.tar.gz
-sudo /opt/mtcalsync/scripts/load-schema.sh mtcalsync
+# 2. On the server: unpack the deploy scripts, then provision, deploy, load the schema
+mkdir -p /tmp/mtcalsync && tar -xzf /tmp/mtcalsync-engine.tar.gz -C /tmp/mtcalsync
+sudo bash /tmp/mtcalsync/deploy/provision.sh
+sudo bash /tmp/mtcalsync/deploy/deploy-on-server.sh /tmp/mtcalsync-engine.tar.gz
+sudo bash /opt/mtcalsync/deploy/load-schema.sh mtcalsync
 
 # 3. Set the portal operator password, then start the services
+alias mtcs='sudo -u mtcalsync dotnet /opt/mtcalsync/worker-publish/Worker.MT-CalSync.dll'
 mtcs set-admin-password --password '<choose-a-strong-password>'
-systemctl start mtcalsync-selfhost.service mtcalsync-sync.timer
+sudo systemctl start mtcalsync-selfhost.service mtcalsync-sync.timer
 ```
 
 Then open the portal, enter your Google/Microsoft credentials under **Settings**
 (see [_docs/PROVIDER-SETUP.md](_docs/PROVIDER-SETUP.md)), connect your calendars, and
 create a sync pair. The first sync runs within about five minutes.
 
-`mtcs` is a convenience wrapper for the worker CLI:
+`mtcs`, defined in step 3, is a convenience wrapper for the worker CLI:
 
 ```bash
 alias mtcs='sudo -u mtcalsync dotnet /opt/mtcalsync/worker-publish/Worker.MT-CalSync.dll'
@@ -77,7 +80,7 @@ mtcs sync --pair 1 --dry-run
 
 ```bash
 dotnet build MT-CalSync.Engine.sln           # engine solution
-dotnet run --project SelfHost.MT-CalSync     # portal on http://localhost:5091
+dotnet run --project SelfHost.MT-CalSync -- --urls http://localhost:5091   # portal
 ```
 
 ## Issues, security, and changes

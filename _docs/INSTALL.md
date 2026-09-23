@@ -30,10 +30,12 @@ scp build/mtcalsync-engine.tar.gz user@server:/tmp/
 ## 3. Provision + deploy (on the server, as root)
 
 ```bash
-# Unpack the deploy assets once to run provision from them, or run the copies in the tarball.
-sudo ./provision.sh                                   # service user, dirs, DB, key, units
-sudo ./deploy-on-server.sh /tmp/mtcalsync-engine.tar.gz
-sudo /opt/mtcalsync/scripts/load-schema.sh mtcalsync  # one-time schema load
+# Unpack the bundle to reach its deploy scripts. They are run with `bash` because a bundle
+# built on Windows carries no executable bits.
+mkdir -p /tmp/mtcalsync && tar -xzf /tmp/mtcalsync-engine.tar.gz -C /tmp/mtcalsync
+sudo bash /tmp/mtcalsync/deploy/provision.sh           # service user, dirs, DB, key, units
+sudo bash /tmp/mtcalsync/deploy/deploy-on-server.sh /tmp/mtcalsync-engine.tar.gz
+sudo bash /opt/mtcalsync/deploy/load-schema.sh mtcalsync  # one-time schema load
 ```
 
 `provision.sh` creates the `mtcalsync` service user, `/opt/mtcalsync`, a local
@@ -44,6 +46,9 @@ secret), and installs the systemd units.
 ## 4. Configure
 
 ```bash
+# A wrapper for the worker CLI, used below and in the README:
+alias mtcs='sudo -u mtcalsync dotnet /opt/mtcalsync/worker-publish/Worker.MT-CalSync.dll'
+
 # The portal operator login (single admin; stored as a PBKDF2 hash):
 mtcs set-admin-password --password '<choose-a-strong-password>'
 
@@ -73,7 +78,7 @@ sudo certbot --nginx -d calendar.example.com
 
 ```bash
 dotnet build MT-CalSync.Engine.sln
-dotnet run --project SelfHost.MT-CalSync      # http://localhost:5091
+dotnet run --project SelfHost.MT-CalSync -- --urls http://localhost:5091
 ```
 
 Put a `settings.xml` next to the built assembly (or in the project dir) with at least

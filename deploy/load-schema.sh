@@ -4,7 +4,7 @@
 # bundled into worker-publish/sql/ by build-and-package.ps1) in numeric order.
 #
 # Run on the server as root (local MySQL root socket auth):
-#   sudo /opt/mtcalsync/scripts/load-schema.sh [db-name] [sql-dir]
+#   sudo bash /opt/mtcalsync/deploy/load-schema.sh [db-name] [sql-dir]
 #
 #   db-name  defaults to "mtcalsync"
 #   sql-dir  defaults to "/opt/mtcalsync/worker-publish/sql"
