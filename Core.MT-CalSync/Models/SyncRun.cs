@@ -31,13 +31,15 @@ namespace Core.MTCalSync
 			status = finalStatus;
 			if (runID <= 0) return;
 			var oDA = new DataAccess();
+			// syncType too: a run is inserted as incremental before it knows whether it will list
+			// a calendar in full, and the label used to stay that way whatever happened.
 			string sql =
-				"update sync_run set finishedAt=NOW(), status=@status, leftChanges=@lc, rightChanges=@rc, createdCount=@cc, " +
+				"update sync_run set finishedAt=NOW(), status=@status, syncType=@st, leftChanges=@lc, rightChanges=@rc, createdCount=@cc, " +
 				"updatedCount=@uc, deletedCount=@dc, skippedCount=@sc, echoSkippedCount=@ec, conflictCount=@cf, adoptedCount=@ad, " +
 				"deadLetteredCount=@dl, errorText=@err where runID=@id";
 			var p = new Dictionary<string, object>
 			{
-				{ "@status", finalStatus }, { "@lc", leftChanges }, { "@rc", rightChanges }, { "@cc", createdCount },
+				{ "@status", finalStatus }, { "@st", syncType }, { "@lc", leftChanges }, { "@rc", rightChanges }, { "@cc", createdCount },
 				{ "@uc", updatedCount }, { "@dc", deletedCount }, { "@sc", skippedCount }, { "@ec", echoSkippedCount },
 				{ "@cf", conflictCount }, { "@ad", adoptedCount }, { "@dl", deadLetteredCount },
 				{ "@err", errorText ?? string.Empty }, { "@id", runID }

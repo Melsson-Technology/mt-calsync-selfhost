@@ -8,7 +8,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Thi
 pre-1.0 and does not yet follow semantic versioning - breaking changes will be called out in
 their entry.
 
-## [Unreleased]
+## [2026-09-25] - deletions in Microsoft 365 reach Google
+
+### Fixed
+
+- **Deletions in Microsoft 365 never reached Google, and every run re-read both calendars in
+  full.** A delta token only reports changes inside the date range it was minted over, and it
+  was minted over exactly the sync window, which moves with the clock. By the next run the
+  window had moved past it, so every run listed both calendars in full while recording itself
+  as incremental. A full Microsoft 365 list shows only the events that exist, so an event
+  deleted there kept its copy in Google. Full lists now reach two days past the window (what is
+  mirrored is still the window), so a token lasts until the next daily full resync, and before
+  any full list the engine reads the old token for the deletions it holds. This release doesn't
+  go back for copies left by earlier deletions: delete those in Google.
+- **An event cancelled in Google was deleted from Microsoft 365 again on every run.** Google's
+  full list includes cancelled events, and each one sent another delete for a copy that was
+  already gone, which also showed as a deletion in every run's history. A deletion is now
+  applied once.
+- Run history says `full_resync` whenever a run listed a calendar in full, including when an
+  expired token forced it. The label was never saved before: every run in history read
+  `incremental`, even an operator's full resync.
+- A token the provider refuses no longer fails the pair on every run until someone runs
+  `resync`: the run lists in full and starts a new token. A passing throttle still fails the
+  run and keeps the token.
+- Microsoft 365 delta pages ask for UTC on every request, not only the first. Times are read as
+  UTC, and the later pages relied on Graph's default.
+
+## [2026-09-25] - self-host hardening
 
 ### Added
 

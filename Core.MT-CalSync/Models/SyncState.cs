@@ -34,7 +34,7 @@ namespace Core.MTCalSync
 			return o;
 		}
 
-		// Persist the new token + window after a successful page-drain. Upsert on
+		// Persist the new token + the range it covers after a successful page-drain. Upsert on
 		// (pairID, provider). Also records success + optional full-resync stamp.
 		public void saveAfterRun(string? newToken, RollingWindow window, bool wasFull)
 		{

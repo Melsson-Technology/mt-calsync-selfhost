@@ -116,6 +116,9 @@ namespace Core.MTCalSync
 		};
 
 		public bool Contains(DateTime utc) => utc >= StartUtc && utc <= EndUtc;
+
+		// The same window with its end pushed out by `tail`.
+		public RollingWindow ExtendedBy(TimeSpan tail) => new() { StartUtc = StartUtc, EndUtc = EndUtc + tail };
 	}
 
 	// ── RemoteEvent: normalized event read from either provider ───────────────
@@ -194,7 +197,5 @@ namespace Core.MTCalSync
 		public List<RemoteEvent> Items { get; set; } = new();
 		public string? NewToken { get; set; }        // deltaLink (Graph) or nextSyncToken (Google)
 		public bool WasFullSync { get; set; }
-		public DateTime WindowStart { get; set; }
-		public DateTime WindowEnd { get; set; }
 	}
 }

@@ -47,9 +47,11 @@ namespace Core.MTCalSync
 		// Graph is a stub for now (destination is always the mailbox default calendar).
 		Task<IReadOnlyList<RemoteCalendar>> ListCalendarsAsync();
 
-		// Incremental pull. Handles first-run/forceFull full sync and token expiry
-		// (Graph re-mint on window drift; Google 410 -> full). Returns changed events
-		// plus the new deltaLink/syncToken to persist AFTER a successful apply.
+		// Incremental pull: the changes since the stored token, or every event in `window` when
+		// forceFull is set or there is no token. A full list's new token covers `window`; the
+		// caller decides when a stored token no longer covers what it needs (SyncEngine.
+		// TokenCovers). An expired token (410) falls back to a full list. Returns the changed
+		// events plus the new deltaLink/syncToken to persist AFTER a successful apply.
 		Task<ChangeSet> GetChangesAsync(RollingWindow window, SyncState state, bool forceFull);
 
 		// Targeted reads (repair / match-before-create ladder).

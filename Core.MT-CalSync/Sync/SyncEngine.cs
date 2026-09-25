@@ -30,7 +30,14 @@ namespace Core.MTCalSync
 		private readonly bool _force;        // bypass the circuit breaker
 		private readonly bool _fullResync;   // force a full reconcile (ignore stored tokens)
 		private IEventProjection _projection = new FullDetailProjection();
-		private RollingWindow _window = new();
+		private RollingWindow _window = new();        // what gets mirrored
+		private RollingWindow _tokenRange = new();    // what a full list reads, and so what its token covers
+
+		// How far past the window's end a full list reaches. The window slides forward with the
+		// clock and a token only reports changes inside the range it was minted over, so without
+		// this margin a token was stale a minute after it was minted. Two days is twice the gap
+		// between daily full resyncs, so a stored token outlives one missed resync.
+		private static readonly TimeSpan TokenSlack = TimeSpan.FromDays(2);
 		private readonly Dictionary<string, ICalendarProvider> _providers = new();
 		private readonly EventMapping _map = new();
 		private readonly DeadLetter _dl = new();
@@ -67,6 +74,7 @@ namespace Core.MTCalSync
 			_projection = ProjectionFactory.For(_pair);
 			var now = DateTime.UtcNow;
 			_window = RollingWindow.Around(now, _pair.lookbackDays, _pair.windowDays);
+			_tokenRange = _window.ExtendedBy(TokenSlack);
 
 			var lockRow = new SyncLock(_pair.pairID);
 			if (!_dryRun && !lockRow.tryAcquire(600))
@@ -80,7 +88,7 @@ namespace Core.MTCalSync
 			var run = _dryRun
 				? new SyncRun { pairID = _pair.pairID, triggerType = "dry-run", syncType = "incremental", status = "running" }
 				: SyncRun.start(_pair.pairID, trigger, "incremental");
-			var pendingTokens = new Dictionary<string, (string? token, bool wasFull)>();
+			var pendingTokens = new Dictionary<string, (string? token, bool wasFull, RollingWindow range)>();
 			try
 			{
 				BuildProviders();
@@ -90,19 +98,25 @@ namespace Core.MTCalSync
 				foreach (var side in Directions.SourceSides(_pair.direction))
 				{
 					var state = new SyncState().getByPairProvider(_pair.pairID, side);
-					bool forceFull = _fullResync || _force || DueForFullResync(state, now);
-					if (forceFull) run.syncType = "full_resync";
+					bool forceFull = _fullResync || _force || DueForFullResync(state, now) || !TokenCovers(state, _window);
 
 					ChangeSet changes;
-					try { changes = await _providers[side].GetChangesAsync(_window, state, forceFull); }
+					try { changes = await PullChanges(side, state, forceFull); }
 					catch (ProviderException pe)
 					{
 						if (!_dryRun) state.recordFailure(pe.Message);   // feeds the scheduler's backoff
 						throw;   // abort the run; tokens for this side are not advanced
 					}
+					// Labelled by what was read, not by what was asked for: a provider falls back
+					// to a full list by itself when its token has expired.
+					if (changes.WasFullSync) run.syncType = "full_resync";
 
 					if (side == Providers.M365) run.leftChanges += changes.Items.Count; else run.rightChanges += changes.Items.Count;
-					pendingTokens[side] = (changes.NewToken, changes.WasFullSync);
+					// An incremental token covers the range its full list was minted over, so that
+					// range is carried forward unchanged (TokenCovers guarantees it's on record).
+					var range = changes.WasFullSync ? _tokenRange
+						: new RollingWindow { StartUtc = state.windowStart!.Value, EndUtc = state.windowEnd!.Value };
+					pendingTokens[side] = (changes.NewToken, changes.WasFullSync, range);
 
 					foreach (var c in changes.Items)
 					{
@@ -158,7 +172,7 @@ namespace Core.MTCalSync
 				{
 					if (!pendingTokens.TryGetValue(side, out var pt)) continue;
 					var state = new SyncState { pairID = _pair.pairID, provider = side };
-					state.saveAfterRun(pt.token, _window, pt.wasFull);
+					state.saveAfterRun(pt.token, pt.range, pt.wasFull);
 				}
 
 				string final = run.deadLetteredCount > 0 ? "partial" : "success";
@@ -281,6 +295,44 @@ namespace Core.MTCalSync
 			return now.Hour == _pair.fullResyncHour && state.lastFullResyncAt.Value.Date < now.Date;
 		}
 
+		// A stored token is good while the range it was minted over still covers the live
+		// window. It used to be checked against the range of the previous run's window, which
+		// the clock had already moved past, so every run listed both calendars in full, and a
+		// full Graph list never reports a deletion.
+		private static bool TokenCovers(SyncState state, RollingWindow live) =>
+			state.HasToken && state.windowStart.HasValue && state.windowEnd.HasValue
+			&& state.windowStart.Value <= live.StartUtc && state.windowEnd.Value >= live.EndUtc;
+
+		// One side's changes. A full list shows only what exists now, so it can't report an
+		// event deleted since the last run (a full Graph list never includes deleted events at
+		// all). When a full list is due while a token is still held, read the token first and
+		// keep the deletions it reports; otherwise the daily full resync would drop a deletion
+		// made in the minutes before it.
+		private async Task<ChangeSet> PullChanges(string side, SyncState state, bool forceFull)
+		{
+			var provider = _providers[side];
+			if (!state.HasToken)
+				return await provider.GetChangesAsync(_tokenRange, state, true);
+
+			ChangeSet pending;
+			try { pending = await provider.GetChangesAsync(_tokenRange, state, false); }
+			catch (ProviderException pe) when (!pe.IsTransient)
+			{
+				// A token the provider refuses is abandoned rather than retried every run until
+				// someone clears it. The providers already turn a 410 into a full list; any other
+				// refusal gets the same treatment here. If the calendar itself is the problem, the
+				// full list fails the same way and says so.
+				Common.writeToLog($"pair={_pair.pairID} {side} token refused ({pe.Message}); listing in full instead.");
+				return await provider.GetChangesAsync(_tokenRange, state, true);
+			}
+			if (!forceFull || pending.WasFullSync) return pending;   // WasFullSync: it had expired, so that read was the full list
+
+			var full = await provider.GetChangesAsync(_tokenRange, state, true);
+			var listed = new HashSet<string>(full.Items.Select(i => i.Id));
+			full.Items.AddRange(pending.Items.Where(i => i.IsDeleted && !listed.Contains(i.Id)));
+			return full;
+		}
+
 		// ── classify one change on source side ──────────────────────────────
 		private async Task<SyncOp?> Classify(string side, RemoteEvent c, SyncRun run)
 		{
@@ -297,6 +349,11 @@ namespace Core.MTCalSync
 				return ClassifyException(side, c, run);
 
 			var m = _map.findBySideKey(_pair.pairID, side, Common.Sha256Hex(c.Id));
+
+			// A tombstoned mapping is finished with: its mirror was deleted, or a teardown chose to
+			// keep it. Seeing the deletion again changes nothing. Without this, every full list that
+			// still showed a cancelled Google event sent another delete for a mirror already gone.
+			if (m != null && m.status == "tombstoned" && c.IsDeleted) { run.skippedCount++; return null; }
 
 			// EntryID-churn recovery: Exchange reissues an event's id on some edits/accepts,
 			// so the side-key lookup can miss an event we ALREADY mirror. Left unhandled it

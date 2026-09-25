@@ -64,7 +64,8 @@ dotnet run --project SelfHost.MT-CalSync -- --urls http://localhost:5091
 Without `--urls` it binds ASP.NET's default, <http://localhost:5000>.
 
 **On tests:** the engine does not ship a public test project yet. The suite that exercises
-encryption round-trips, the scheduler's gating and backoff, and the OAuth token custody path
+encryption round-trips, the scheduler's gating and backoff, the OAuth token custody path, and
+the sync engine itself against in-memory calendars (through `ProviderFactory.TestOverride`)
 currently lives in the private repository alongside the hosted service, and splitting the
 provider-independent parts out is open work. If you are changing engine logic, say in the
 issue what you did to convince yourself it was right - that is the substitute for now, and

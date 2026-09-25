@@ -106,8 +106,8 @@ namespace Core.MTCalSync
 		// ── incremental pull ────────────────────────────────────────────────
 		public async Task<ChangeSet> GetChangesAsync(RollingWindow window, SyncState state, bool forceFull)
 		{
-			var cs = new ChangeSet { WindowStart = window.StartUtc, WindowEnd = window.EndUtc };
-			bool useIncremental = !forceFull && !string.IsNullOrEmpty(state.syncToken) && WindowStillCovered(state, window);
+			var cs = new ChangeSet();
+			bool useIncremental = !forceFull && !string.IsNullOrEmpty(state.syncToken);
 			cs.WasFullSync = !useIncremental;
 
 			try
@@ -155,9 +155,6 @@ namespace Core.MTCalSync
 			}
 			return cs;
 		}
-
-		private static bool WindowStillCovered(SyncState state, RollingWindow window) =>
-			state.windowEnd.HasValue && state.windowEnd.Value >= window.EndUtc.AddMinutes(-1);
 
 		// ── targeted reads ──────────────────────────────────────────────────
 		public async Task<RemoteEvent?> GetAsync(string eventId)

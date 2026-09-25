@@ -75,12 +75,14 @@ namespace Core.MTCalSync
 		// ── incremental pull ────────────────────────────────────────────────
 		public async Task<ChangeSet> GetChangesAsync(RollingWindow window, SyncState state, bool forceFull)
 		{
-			var cs = new ChangeSet { WindowStart = window.StartUtc, WindowEnd = window.EndUtc };
+			var cs = new ChangeSet();
 			var byId = new Dictionary<string, Event>();
 			int maxPages = Settings.MaxDeltaPages;
 			int pages = 0;
 			string? deltaLink = null;
-			bool useIncremental = !forceFull && !string.IsNullOrEmpty(state.deltaLink) && WindowStillCovered(state, window);
+			// A deltaLink stays bound to the window it was minted over; the engine re-mints
+			// (forceFull) once the live window outgrows it.
+			bool useIncremental = !forceFull && !string.IsNullOrEmpty(state.deltaLink);
 
 			try
 			{
@@ -186,13 +188,6 @@ namespace Core.MTCalSync
 			return cs;
 		}
 
-		private static bool WindowStillCovered(SyncState state, RollingWindow window)
-		{
-			// The stored deltaLink is bound to windowEnd it was minted for. Once the live
-			// window slides past it, force a re-mint so new far-future events appear.
-			return state.windowEnd.HasValue && state.windowEnd.Value >= window.EndUtc.AddMinutes(-1);
-		}
-
 		// One page of calendarView/delta, normalized across the default-calendar and
 		// named-calendar request builders (the SDK generates a distinct response type
 		// per path; this adapter keeps the paging loop single-shaped).
@@ -204,14 +199,15 @@ namespace Core.MTCalSync
 		}
 
 		// url == null → initial windowed request; otherwise follow the given
-		// nextLink/deltaLink verbatim.
+		// nextLink/deltaLink verbatim. Every page asks for UTC: ParseGraphDate reads times as
+		// UTC, and a link carries the query of the request that minted it but not its headers.
 		private async Task<DeltaPage> FetchDeltaPage(string? url, RollingWindow? window)
 		{
 			var page = new DeltaPage();
 			if (UseDefaultCalendar)
 			{
 				var r = url != null
-					? await _graph.Users[_principal].CalendarView.Delta.WithUrl(url).GetAsDeltaGetResponseAsync()
+					? await _graph.Users[_principal].CalendarView.Delta.WithUrl(url).GetAsDeltaGetResponseAsync(rc => rc.Headers.Add("Prefer", "outlook.timezone=\"UTC\""))
 					: await _graph.Users[_principal].CalendarView.Delta.GetAsDeltaGetResponseAsync(rc =>
 					{
 						rc.QueryParameters.StartDateTime = window!.StartUtc.ToString("yyyy-MM-ddTHH:mm:ss");
@@ -225,7 +221,7 @@ namespace Core.MTCalSync
 			else
 			{
 				var r = url != null
-					? await _graph.Users[_principal].Calendars[_calId].CalendarView.Delta.WithUrl(url).GetAsDeltaGetResponseAsync()
+					? await _graph.Users[_principal].Calendars[_calId].CalendarView.Delta.WithUrl(url).GetAsDeltaGetResponseAsync(rc => rc.Headers.Add("Prefer", "outlook.timezone=\"UTC\""))
 					: await _graph.Users[_principal].Calendars[_calId].CalendarView.Delta.GetAsDeltaGetResponseAsync(rc =>
 					{
 						rc.QueryParameters.StartDateTime = window!.StartUtc.ToString("yyyy-MM-ddTHH:mm:ss");

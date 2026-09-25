@@ -10,8 +10,15 @@ namespace Core.MTCalSync
 	//                     the network.
 	public static class ProviderFactory
 	{
+		// Tests only. When set, Create returns this instead of a real provider, so a test can
+		// run the whole engine against in-memory calendars. Nothing in the worker or the
+		// portals sets it.
+		public static Func<ProviderConnection, bool, ICalendarProvider>? TestOverride { get; set; }
+
 		public static ICalendarProvider Create(ProviderConnection conn, bool seriesMode = false)
 		{
+			if (TestOverride != null) return TestOverride(conn, seriesMode);
+
 			if (conn.authKind == AuthKinds.DelegatedOauth)
 				return CreateDelegated(conn, seriesMode);
 
