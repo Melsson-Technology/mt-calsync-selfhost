@@ -87,12 +87,16 @@ namespace Core.MTCalSync
 			};
 			try
 			{
-				long id = oDA.insertData(sql, p);
-				if (id > 0) { connectionID = id; return id; }
-				// ON DUPLICATE with no change returns 0 — look the existing row up.
+				oDA.insertData(sql, p);
+				if (!string.IsNullOrEmpty(oDA.errorMessage)) { Common.writeToLog("ERROR ProviderConnection.ensure: " + oDA.errorMessage); return 0; }
+
+				// Always read the id back by the unique key. insertData's id is LAST_INSERT_ID(),
+				// which the UPDATE branch of an upsert does not set: it returns whatever the
+				// pooled session inserted last, possibly a row in another table. A pair reusing an
+				// existing connection was wired to the connection created a moment before it.
 				var q = new Dictionary<string, object> { { "@pr", provider }, { "@pe", principalEmail }, { "@ci", calendarId } };
-				object? existing = oDA.execScalar("select connectionID from provider_connection where provider=@pr and principalEmail=@pe and calendarId=@ci limit 1", q);
-				connectionID = Common.ToLong(existing);
+				object? row = oDA.execScalar("select connectionID from provider_connection where provider=@pr and principalEmail=@pe and calendarId=@ci limit 1", q);
+				connectionID = Common.ToLong(row);
 			}
 			catch (Exception ex) { Common.writeToLog("ERROR ProviderConnection.ensure:", ex); }
 			return connectionID;

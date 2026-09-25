@@ -11,6 +11,11 @@ builder.WebHost.ConfigureKestrel(o => o.AddServerHeader = false);
 
 builder.Services.AddControllersWithViews();
 
+// The antiforgery cookie defaults to no Secure flag even over HTTPS. SameAsRequest marks
+// it Secure behind TLS (the proxy's forwarded proto counts) and still works over plain
+// HTTP on an SSH tunnel, matching the auth cookie below.
+builder.Services.AddAntiforgery(o => o.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest);
+
 // DataProtection keys must survive deploys (the publish dir is swapped atomically)
 // or every cookie and pending OAuth state dies on each ship.
 builder.Services.AddDataProtection()
@@ -65,7 +70,14 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
 });
 
 if (!app.Environment.IsDevelopment())
+{
 	app.UseExceptionHandler("/Home/Error");
+	// HSTS only reaches browsers over HTTPS (and never for localhost), so a tunnel or a
+	// plain-HTTP test install is unaffected. The framework's 30 days rather than a year:
+	// a self-hoster may later move the portal behind a tunnel or change hostnames, and
+	// a long pin would lock their own browser out of plain HTTP in the meantime.
+	app.UseHsts();
+}
 
 app.UseStaticFiles();
 app.UseRouting();

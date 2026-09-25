@@ -44,11 +44,15 @@ namespace Core.MTCalSync
 				copyAttendeesToBody = Settings.CopyAttendeesToBody,
 				maxWritesPerRun = Settings.MaxWritesPerRun,
 				fullResyncHour = Settings.FullResyncHour,
-				enabled = true
+				// Paused. These pairs impersonate mailboxes with app-only credentials, and
+				// the advice has always been to dry-run one before it goes live. Created
+				// enabled, the timer ran it within a minute, before anyone could.
+				enabled = false
 			};
 			long pairId = pair.insert();
-			Console.WriteLine($"Created sync pair {pairId}: {pair.name} [{pair.direction}, {pair.fidelityMode}, {pair.recurrenceMode}]");
-			Console.WriteLine("Next: run `setup-check` to verify live calendar access, then `sync --pair " + pairId + " --dry-run`.");
+			Console.WriteLine($"Created sync pair {pairId} (paused): {pair.name} [{pair.direction}, {pair.fidelityMode}, {pair.recurrenceMode}]");
+			Console.WriteLine($"Next: `setup-check` to test calendar access, `sync --pair {pairId} --dry-run` to preview it, " +
+				$"then `resume --pair {pairId}` to start syncing.");
 			return pairId;
 		}
 
@@ -362,10 +366,12 @@ namespace Core.MTCalSync
 			Console.WriteLine("Resolve with: dead-letters --pair " + pairId + " --resolve <id>   (or --resolve-all)");
 		}
 
-		public static void Pause(long pairId, bool paused)
+		// Returns false for a pair that doesn't exist, so the CLI can exit non-zero.
+		public static bool Pause(long pairId, bool paused)
 		{
-			bool ok = new SyncPair().setEnabled(pairId, !paused);
+			bool ok = new SyncPair().getById(pairId).pairID != 0 && new SyncPair().setEnabled(pairId, !paused);
 			Console.WriteLine(ok ? $"Pair {pairId} {(paused ? "paused" : "resumed")}." : $"Pair {pairId} not found.");
+			return ok;
 		}
 
 		// Reset delta/sync tokens for a pair — the next run does a safe full reconcile
@@ -379,11 +385,12 @@ namespace Core.MTCalSync
 			Console.WriteLine($"Tokens cleared for pair {pairId}. Next `sync` will full-resync and re-adopt via the match ladder.");
 		}
 
-		public static void TestEmail()
+		public static bool TestEmail()
 		{
 			bool ok = Email.SendAlert("MT-CalSync test email",
 				"This is a test alert from MT-CalSync. If you received it, failure notifications are configured correctly.");
-			Console.WriteLine(ok ? "Test email sent to " + Settings.AlertTo : "Test email NOT sent — check SMTP settings (SmtpHost/AlertTo/SmtpFrom).");
+			Console.WriteLine(ok ? "Test email sent to " + Settings.AlertTo : "Test email NOT sent. Check the SMTP settings (SmtpHost/AlertTo/SmtpFrom) and the worker log.");
+			return ok;
 		}
 
 		// Encrypt a secret and store it in the DB settings table (DB-first resolution).
@@ -402,7 +409,7 @@ namespace Core.MTCalSync
 		// Returns false, having said why, if the password was not stored.
 		public static bool SetAdminPassword(string password)
 		{
-			if (string.IsNullOrWhiteSpace(password)) { Console.WriteLine("Usage: set-admin-password --password <value>"); return false; }
+			if (string.IsNullOrWhiteSpace(password)) { Console.WriteLine("No password given, so nothing was changed. Run set-admin-password and enter it at the prompt."); return false; }
 			string weak = PasswordHasher.CheckStrength(password);
 			if (weak.Length > 0) { Console.WriteLine(weak); return false; }
 			if (!TrySave("SelfHostAdminPasswordHash", PasswordHasher.Hash(password))) return false;
@@ -538,35 +545,28 @@ namespace Core.MTCalSync
 			finally { lockRow.release(); }
 		}
 
-		// Re-encrypt legacy-format secrets in the settings table under the current
-		// DataEncryptionKey (v2 AES-GCM). Safe to re-run; skips values already v2.
+		// Check that every stored secret is in the current v2 (AES-GCM) format. Pre-v2
+		// ciphertext can no longer be decrypted, so there is nothing left to convert: a legacy
+		// value is reported as one to re-enter. A secret that can't be read is a failure. The
+		// read error used to be dropped, so an unreachable database reported "0 failed".
 		public static bool MigrateSecrets()
 		{
 			if (string.IsNullOrWhiteSpace(Settings.DataEncryptionKey))
-			{ Console.WriteLine("DataEncryptionKey is not set in settings.xml — aborting."); return false; }
+			{ Console.WriteLine("DataEncryptionKey is not set in settings.xml, so nothing was checked."); return false; }
 
-			string[] secretNames = { "GraphClientSecret", "SmtpPassword", "GoogleServiceAccountJson" };
-			int migrated = 0, skipped = 0, failed = 0;
+			string[] secretNames = { "GraphClientSecret", "SmtpPassword", "GoogleServiceAccountJson", "MsOAuthClientSecret", "GoogleOAuthClientSecret" };
+			int current = 0, notSet = 0, failed = 0;
 			foreach (var name in secretNames)
 			{
-				var row = new Settings().getByName(name);
-				if (row.settingID == 0 || string.IsNullOrWhiteSpace(row.settingValue)) { skipped++; continue; }
-				if (!Encryption.IsLegacy(row.settingValue)) { Console.WriteLine($"{name}: already v2."); skipped++; continue; }
-				try
-				{
-					string plain = Encryption.Decrypt(row.settingValue);   // legacy path
-					if (!TrySave(name, Encryption.Encrypt(plain))) { failed++; continue; }
-					Console.WriteLine($"{name}: migrated to v2.");
-					migrated++;
-				}
-				catch (Exception ex)
-				{
-					Console.WriteLine($"{name}: FAILED to migrate — {ex.Message}");
-					Common.writeToLog($"ERROR MigrateSecrets({name}):", ex);
-					failed++;
-				}
+				var reader = new Settings();
+				var row = reader.getByName(name);
+				if (!string.IsNullOrEmpty(reader.errorMessage)) { Console.WriteLine($"{name}: could not be read: {reader.errorMessage}"); failed++; continue; }
+				if (row.settingID == 0 || string.IsNullOrWhiteSpace(row.settingValue)) { notSet++; continue; }
+				if (!Encryption.IsLegacy(row.settingValue)) { current++; continue; }
+				Console.WriteLine($"{name}: stored in the pre-v2 format, which this version can't decrypt. Re-enter it in Settings or with set-secret.");
+				failed++;
 			}
-			Console.WriteLine($"Done. {migrated} migrated, {skipped} skipped, {failed} failed.");
+			Console.WriteLine($"Done. {current} current (v2), {notSet} not set, {failed} to fix.");
 			return failed == 0;
 		}
 

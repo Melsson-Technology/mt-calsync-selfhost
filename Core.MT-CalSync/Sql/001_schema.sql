@@ -1,9 +1,10 @@
 -- MT-CalSync engine schema (baseline).
 --
--- Apply once to a fresh MySQL/MariaDB database:
+-- Apply to a MySQL 8 database (MariaDB is not supported):
 --   mysql -h <host> -u <user> -p <db> < 001_schema.sql
--- (load-schema.sh applies Sql/*.sql in numeric order.) Plain CREATE TABLE, no
--- migration tracking; re-running on a populated DB errors on existing objects.
+-- (load-schema.sh applies Sql/*.sql in numeric order.) Every table is CREATE TABLE IF
+-- NOT EXISTS, so a re-run is a no-op; it never alters an existing table, and there is
+-- no migration tracking.
 --
 -- Self-host uses the built-in tenant id 1 for the userID/customerID columns, which
 -- have NO foreign keys here so the engine schema applies standalone. The hosted SaaS

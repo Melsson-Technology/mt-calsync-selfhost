@@ -17,18 +17,23 @@
     </p>
     @if (!googleConfigured || !msConfigured)
     {
+        @* A self-hoster registers their own OAuth apps, so "not available yet" left them
+           with nothing to do. Say what's missing and where it goes. *@
+        string missing = !googleConfigured && !msConfigured ? "Google and Microsoft" : (!googleConfigured ? "Google" : "Microsoft");
         <p class="muted">
-            @(!googleConfigured ? "Google connections aren't available yet. " : "")
-            @(!msConfigured ? "Microsoft connections aren't available yet." : "")
+            To connect @missing accounts, add your @missing OAuth client@(!googleConfigured && !msConfigured ? "s" : "")
+            under <a asp-controller="Settings" asp-action="Index">Settings</a>. <code>_docs/PROVIDER-SETUP.md</code>
+            explains how to create @(!googleConfigured && !msConfigured ? "them" : "one").
         </p>
     }
-    <p class="muted">You'll sign in with the provider and grant calendar access. We never see your password.
-        You can disconnect at any time, which deletes the stored access tokens.</p>
+    <p class="muted">You sign in on Google's or Microsoft's own page, so this server never sees your password.
+        It keeps the access tokens encrypted, and disconnecting an account deletes them.</p>
     @if ((bool)(ViewBag.UnverifiedAppNotice ?? false))
     {
-        <p class="muted">Heads-up: while our app verification with Google and Microsoft is in progress, their
-            consent screens may show an "unverified app" warning. Review the requested calendar permissions
-            and continue via "Advanced" if you're comfortable. The access requested is calendar-only either way.</p>
+        <p class="muted">Heads-up: Google shows an "unverified app" screen for OAuth apps it hasn't reviewed, which is
+            normal for a self-hosted install, and Microsoft may show your app as unverified too. If this is your
+            own server, choose "Advanced" and continue. The app asks only for calendar access and your basic
+            sign-in details.</p>
     }
 </div>
 

@@ -8,7 +8,7 @@
 #   sudo ./provision.sh
 #
 # Prerequisites (install yourself): the .NET 8 ASP.NET runtime, MySQL 8.0 or later, and
-# nginx (optional). See engine/_docs/INSTALL.md.
+# nginx (optional). See _docs/INSTALL.md, which covers Ubuntu and Debian.
 #
 # Environment overrides: MTCALSYNC_DB (database name, default mtcalsync), MTCALSYNC_DB_USER
 # (default mtcalsync), MTCALSYNC_DB_PASSWORD (rotates the database password; otherwise the
@@ -26,7 +26,15 @@ DB_USER="${MTCALSYNC_DB_USER:-$APP_USER}"
 echo "==> service user + directories"
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --home "$APP_HOME" --shell /usr/sbin/nologin "$APP_USER"
 mkdir -p "$APP_HOME" "$CONF_DIR" "$CONF_DIR/dpkeys"
-chown -R "$APP_USER:$APP_USER" "$APP_HOME"
+# /opt/mtcalsync is root's. deploy-on-server.sh gives the service account its two publish
+# dirs and nothing else: root runs the scripts kept here, so the account the portal runs
+# as must not be able to rename or edit them. An install made by an older version, which
+# handed the whole tree over, is put right here and by the next deploy.
+chown root:root "$APP_HOME"
+chmod 0755 "$APP_HOME"
+for d in deploy scripts; do
+    if [[ -d "$APP_HOME/$d" ]]; then chown -R root:root "$APP_HOME/$d"; fi
+done
 chown -R "$APP_USER:$APP_USER" "$CONF_DIR/dpkeys"
 chmod 0700 "$CONF_DIR/dpkeys"
 
@@ -39,7 +47,8 @@ server_version="$(mysql -N -B -e 'SELECT VERSION();')"
 case "$server_version" in
     *MariaDB*)
         echo "ERROR: this database server is MariaDB ($server_version)." >&2
-        echo "       MT-CalSync needs MySQL 8.0 or later: sudo apt-get install -y mysql-server" >&2
+        echo "       MT-CalSync needs MySQL 8.0 or later. On Ubuntu: sudo apt-get install -y mysql-server" >&2
+        echo "       Debian ships only MariaDB; _docs/INSTALL.md shows how to install MySQL from Oracle's repository." >&2
         exit 1 ;;
 esac
 if [[ "${server_version%%.*}" -lt 8 ]]; then
@@ -164,6 +173,7 @@ echo
 echo "Provisioned. Next:"
 echo "  1) Deploy binaries to $APP_HOME (see build-and-package.ps1 + deploy-on-server.sh)."
 echo "  2) sudo bash $APP_HOME/deploy/load-schema.sh $DB_NAME"
-echo "  3) mtcs set-admin-password --password <value>   # the portal operator login"
+echo "  3) Set the portal operator login (it prompts; mtcs is the alias in the README):"
+echo "       sudo -u $APP_USER dotnet $APP_HOME/worker-publish/Worker.MT-CalSync.dll set-admin-password"
 echo "  4) systemctl start mtcalsync-selfhost.service && systemctl start mtcalsync-sync.timer"
 echo "  5) Open the portal, enter your provider credentials in Settings, connect calendars."

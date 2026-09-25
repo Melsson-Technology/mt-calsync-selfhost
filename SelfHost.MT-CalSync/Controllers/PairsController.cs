@@ -6,19 +6,18 @@ using SelfHost.MTCalSync.Models;
 
 namespace SelfHost.MTCalSync.Controllers
 {
-	// /Pairs — create and manage sync pairs (calendar links). Every user manages
-	// their own pairs, built from their connected accounts' calendars; admins can
-	// flip to an all-pairs view. The legacy operator form (app_default connections
-	// addressed by raw email) stays admin-only.
+	// /Pairs — create and manage sync pairs (calendar links): the wizard builds them from
+	// connected accounts' calendars, and the operator form makes app-credential pairs
+	// (app_default connections addressed by raw email).
 	public class PairsController : Controller
 	{
 		// ── list ──────────────────────────────────────────────────────────────
+		// Every pair. A self-host install has one operator, and app-credential pairs
+		// carry no user, so the old "your pairs" filter hid them behind an admin toggle.
 		[HttpGet]
-		public IActionResult Index(bool all = false)
+		public IActionResult Index()
 		{
-			long userId = PortalAuth.UserId(User);
-			bool showAll = all && PortalAuth.IsAdmin(User);
-			var pairs = showAll ? new SyncPair().listAll() : new SyncPair().listByUser(userId);
+			var pairs = new SyncPair().listAll();
 
 			var rows = new List<PairRow>();
 			var em = new EventMapping();
@@ -36,7 +35,6 @@ namespace SelfHost.MTCalSync.Controllers
 					OpenDeadLetters = dl.countOpen(p.pairID)
 				});
 			}
-			ViewBag.ShowAll = showAll;
 			return View(rows);
 		}
 
@@ -153,7 +151,8 @@ namespace SelfHost.MTCalSync.Controllers
 				long id = CliCommands.AddPair(name, m365Email, googleEmail, m365Cal ?? "primary",
 					googleCal ?? "primary", direction ?? Directions.Bidirectional,
 					fidelity ?? Fidelity.FullDetail, recurrence ?? RecurrenceModes.Instance);
-				TempData["Info"] = $"Created sync pair {id}. Run a dry-run from the server before enabling live sync.";
+				TempData["Info"] = $"Created sync pair {id}, paused. Preview it on the server with " +
+					$"mtcs sync --pair {id} --dry-run, then resume it here to start syncing.";
 			}
 			catch (Exception ex)
 			{
@@ -196,7 +195,7 @@ namespace SelfHost.MTCalSync.Controllers
 			bool hasGoogle = model.Accounts.Any(a => a.Account.provider == Providers.Google && a.Calendars.Count > 0);
 			bool hasMs = model.Accounts.Any(a => a.Account.provider == Providers.M365 && a.Calendars.Count > 0);
 			if (!hasGoogle || !hasMs)
-				model.BlockReason = "Connect at least one Google and one Microsoft account first (Accounts page).";
+				model.BlockReason = "Connect at least one Google and one Microsoft account first, on the Calendars page.";
 			return model;
 		}
 

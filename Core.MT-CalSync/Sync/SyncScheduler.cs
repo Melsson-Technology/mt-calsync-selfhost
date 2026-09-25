@@ -30,9 +30,11 @@ namespace Core.MTCalSync
 				// allows all; the hosted layer installs a subscription-aware gate.
 				if (!eligibilityCache.TryGetValue(pair.customerID, out var canSync))
 					eligibilityCache[pair.customerID] = canSync = SyncGate.Current.CanSync(pair.customerID);
+				// A dry-run tick previews; it leaves every schedule and alert exactly as it
+				// found them, or a preview would push the real syncs back an interval.
 				if (!canSync)
 				{
-					pairEntity.updateNextRun(pair.pairID, now.AddSeconds(pair.runIntervalSeconds));
+					if (!dryRun) pairEntity.updateNextRun(pair.pairID, now.AddSeconds(pair.runIntervalSeconds));
 					continue;
 				}
 
@@ -41,7 +43,7 @@ namespace Core.MTCalSync
 				var gate = AccountGate(pair, accountCache, now);
 				if (gate != null)
 				{
-					pairEntity.updateNextRun(pair.pairID, gate.Value);
+					if (!dryRun) pairEntity.updateNextRun(pair.pairID, gate.Value);
 					continue;
 				}
 
@@ -57,10 +59,10 @@ namespace Core.MTCalSync
 				try
 				{
 					var run = await new SyncEngine(pair, dryRun, force, fullResync).Run(trigger);
-					Reschedule(pair, run);
+					if (!dryRun) Reschedule(pair, run);
 					if (run != null && (run.status == "failed" || run.status == "aborted_circuit_breaker"))
 						Interlocked.Exchange(ref worst, 2);
-					if (run != null && run.status == "failed")
+					if (!dryRun && run != null && run.status == "failed")
 						MaybeAlertOwnerPersistentFailure(pair, run);
 				}
 				catch (Exception ex)
@@ -68,7 +70,7 @@ namespace Core.MTCalSync
 					// The engine reports its own failures; this catches scheduler-level
 					// surprises so one pair can't take down the batch.
 					Common.writeToLog($"ERROR SyncScheduler pair {pair.pairID}:", ex);
-					pairEntity.updateNextRun(pair.pairID, DateTime.UtcNow.AddSeconds(pair.runIntervalSeconds));
+					if (!dryRun) pairEntity.updateNextRun(pair.pairID, DateTime.UtcNow.AddSeconds(pair.runIntervalSeconds));
 				}
 				finally { gateSem.Release(); }
 			}).ToList();

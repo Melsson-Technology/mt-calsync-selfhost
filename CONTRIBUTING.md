@@ -53,13 +53,15 @@ dotnet build MT-CalSync.Engine.sln
 ```
 
 To run the portal against a scratch database, create it, apply
-`Core.MT-CalSync/Sql/001_schema.sql`, then copy `settings.xml.example` to `settings.xml`
-beside the binaries and fill in the connection string and a fresh `DataEncryptionKey`
-(`openssl rand -base64 32`):
+`Core.MT-CalSync/Sql/001_schema.sql`, then copy `Worker.MT-CalSync/settings.xml.example` to
+`SelfHost.MT-CalSync/settings.xml` (the build copies it beside the binaries) and fill in the
+connection string and a fresh `DataEncryptionKey` (`openssl rand -base64 32`):
 
 ```bash
-dotnet run --project SelfHost.MT-CalSync      # http://localhost:5091
+dotnet run --project SelfHost.MT-CalSync -- --urls http://localhost:5091
 ```
+
+Without `--urls` it binds ASP.NET's default, <http://localhost:5000>.
 
 **On tests:** the engine does not ship a public test project yet. The suite that exercises
 encryption round-trips, the scheduler's gating and backoff, and the OAuth token custody path

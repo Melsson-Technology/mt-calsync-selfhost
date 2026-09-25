@@ -9,8 +9,9 @@
 #   db-name  defaults to "mtcalsync"
 #   sql-dir  defaults to "/opt/mtcalsync/worker-publish/sql"
 #
-# NOTE: one-time operation. Plain CREATE TABLE, no migration tracking — re-running on
-# a populated DB errors on existing objects. Apply later additions by hand.
+# NOTE: every table is CREATE TABLE IF NOT EXISTS, so re-running this is a harmless
+# no-op. For the same reason it never changes a table that already exists, and there is
+# no migration tracking: apply later schema changes by hand.
 
 set -euo pipefail
 

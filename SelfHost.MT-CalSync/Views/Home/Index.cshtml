@@ -1,10 +1,15 @@
 @model HomeViewModel
 @{
-    ViewData["Title"] = "Dashboard";
+    ViewData["Title"] = "System";
     string Badge(bool ok) => ok ? "ok" : "warn";
+    string Optional(bool ok) => ok ? "ok" : "off";
+    // A passing test that read no calendar has only checked the database and settings.
+    bool testedLive = Model.TestCalendars > 0;
+    string resultBadge = Model.TestOk == true && testedLive ? "ok" : "warn";
+    string resultText = Model.TestOk != true ? "FAIL" : (testedLive ? "PASS" : "Settings only");
 }
 
-<h1>Dashboard</h1>
+<h1>System</h1>
 <p class="muted" style="margin-bottom:16px">Configuration status and sync-pair health.</p>
 
 <div class="card">
@@ -13,24 +18,37 @@
         <div>Database <span class="badge @(Model.DbOk?"ok":"warn")">@(Model.DbOk ? "connected" : "error")</span>
             @if (!Model.DbOk) { <div class="muted">@Model.DbMessage</div> }
         </div>
-        <div>Microsoft 365 <span class="badge @Badge(Model.GraphConfigured)">@(Model.GraphConfigured ? "configured" : "incomplete")</span></div>
-        <div>Google <span class="badge @Badge(Model.GoogleConfigured)">@(Model.GoogleConfigured ? "configured" : "incomplete")</span></div>
-        <div>SMTP <span class="badge @(Model.SmtpConfigured?"ok":"off")">@(Model.SmtpConfigured ? "configured" : "off")</span></div>
+        <div>Google sign-in <span class="badge @Badge(Model.GoogleOAuthConfigured)">@(Model.GoogleOAuthConfigured ? "configured" : "not set")</span></div>
+        <div>Microsoft sign-in <span class="badge @Badge(Model.MsOAuthConfigured)">@(Model.MsOAuthConfigured ? "configured" : "not set")</span></div>
+        <div>Email alerts <span class="badge @(Model.SmtpConfigured?"ok":"off")">@(Model.SmtpConfigured ? "configured" : "off")</span></div>
     </div>
+    <div class="row" style="margin-top:10px">
+        <div>Google service account <span class="badge @Optional(Model.GoogleConfigured)">@(Model.GoogleConfigured ? "configured" : "not set")</span></div>
+        <div>Microsoft app-only <span class="badge @Optional(Model.GraphConfigured)">@(Model.GraphConfigured ? "configured" : "not set")</span></div>
+    </div>
+    <p class="muted" style="margin:10px 0 0">
+        The sign-in clients let you connect accounts on the Calendars page. The service account and
+        app-only registration are needed only for app-credential pairs.
+    </p>
     <div style="margin-top:16px">
         <a class="btn" asp-controller="Settings" asp-action="Index">Edit credentials &amp; settings</a>
         <form asp-action="Test" method="post" style="display:inline">
             @Html.AntiForgeryToken()
             <button type="submit" class="btn btn-primary">Test credentials (live)</button>
         </form>
-        <span class="muted">Runs a live probe of Graph + Google + DB + SMTP.</span>
+        <span class="muted">Checks the database and your settings, then reads a few days of events from each calendar in a sync pair.</span>
     </div>
 </div>
 
 @if (Model.TestReport != null)
 {
     <div class="card">
-        <h2>Test result <span class="badge @(Model.TestOk==true?"ok":"warn")">@(Model.TestOk==true ? "PASS" : "FAIL")</span></h2>
+        <h2>Test result <span class="badge @resultBadge">@resultText</span></h2>
+        @if (Model.TestOk == true && !testedLive)
+        {
+            <p class="muted">No calendar was contacted, because there's no sync pair yet. Create one on the
+                <a asp-controller="Pairs" asp-action="Index">Pairs</a> page, then run the test again to check live access.</p>
+        }
         <pre class="report">@string.Join("\n", Model.TestReport)</pre>
     </div>
 }
@@ -39,7 +57,7 @@
     <h2>Sync pairs</h2>
     @if (Model.Pairs.Count == 0)
     {
-        <p class="muted">No pairs yet. <a asp-controller="Pairs" asp-action="Index">Add one</a> once credentials test green.</p>
+        <p class="muted">No pairs yet. <a asp-controller="Pairs" asp-action="Index">Create one</a> to start syncing.</p>
     }
     else
     {

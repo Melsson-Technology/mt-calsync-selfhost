@@ -47,11 +47,14 @@ namespace SelfHost.MTCalSync.Models
 	{
 		public bool DbOk { get; set; }
 		public string DbMessage { get; set; } = string.Empty;
-		public bool GraphConfigured { get; set; }
-		public bool GoogleConfigured { get; set; }
+		public bool MsOAuthConfigured { get; set; }       // sign-in client for Connect Microsoft
+		public bool GoogleOAuthConfigured { get; set; }   // sign-in client for Connect Google
+		public bool GraphConfigured { get; set; }         // app-only (app-credential pairs)
+		public bool GoogleConfigured { get; set; }        // service account (app-credential pairs)
 		public bool SmtpConfigured { get; set; }
 		public List<PairRow> Pairs { get; set; } = new();
 		public List<string>? TestReport { get; set; }
 		public bool? TestOk { get; set; }
+		public int TestCalendars { get; set; }            // calendars the last test actually read
 	}
 }

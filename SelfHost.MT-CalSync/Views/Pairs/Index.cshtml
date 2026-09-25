@@ -3,7 +3,6 @@
 @{
     ViewData["Title"] = "Pairs";
     bool isAdmin = User.IsInRole("Admin");
-    bool showAll = (bool)(ViewBag.ShowAll ?? false);
 }
 
 <h1>Sync pairs</h1>
@@ -13,14 +12,10 @@
 
 <p>
     <a class="btn btn-primary" asp-action="Create">New sync pair</a>
-    @if (isAdmin)
-    {
-        <a class="btn btn-sm" asp-action="Index" asp-route-all="@(!showAll)">@(showAll ? "Show my pairs" : "Show all pairs (admin)")</a>
-    }
 </p>
 
 <div class="card">
-    <h2>@(showAll ? "All pairs" : "Your pairs")</h2>
+    <h2>Your pairs</h2>
     @if (Model.Count == 0)
     {
         <p class="muted">None yet. Create your first pair once both accounts are connected.</p>
@@ -36,10 +31,10 @@
             @foreach (var p in Model)
             {
                 <tr>
-                    <td style="word-break:break-word">@p.Name @(p.Enabled ? "" : Html.Raw("<span class='badge off'>paused</span>"))</td>
+                    <td style="word-break:break-word;min-width:140px">@p.Name @(p.Enabled ? "" : Html.Raw("<span class='badge off'>paused</span>"))</td>
                     <td class="muted">@p.M365Email</td>
                     <td class="muted">@p.GoogleEmail</td>
-                    <td class="muted">@FriendlyDirection(p.Direction) · @(p.Fidelity == "busy_block" ? "busy-only" : "full detail")</td>
+                    <td class="muted">@FriendlyDirection(p.Direction) · @(p.Fidelity == "busy_block" ? "busy-only" : "full detail")@(p.Recurrence == RecurrenceModes.Series ? " · series" : "")</td>
                     <td>@p.Mappings</td>
                     <td>@(p.OpenDeadLetters > 0 ? Html.Raw($"<span class='badge warn'>{p.OpenDeadLetters}</span>") : Html.Raw("0"))</td>
                     <td style="white-space:nowrap">
@@ -49,8 +44,10 @@
                             <input type="hidden" name="enabled" value="@((!p.Enabled).ToString().ToLower())" />
                             <button class="btn btn-sm" type="submit">@(p.Enabled ? "Pause" : "Resume")</button>
                         </form>
+                        @* States what teardown does, nothing more: it deletes the events that
+                           carry this pair's provenance stamp. *@
                         <form asp-action="Remove" method="post" style="margin:0 0 0 6px;display:inline-block"
-                              onsubmit="return confirm('Remove this pair? Events it mirrored are deleted from the destination calendar; your original events are untouched.');">
+                              onsubmit="return confirm('Remove this pair? The mirror events it created are deleted.');">
                             @Html.AntiForgeryToken()
                             <input type="hidden" name="id" value="@p.PairID" />
                             <button class="btn btn-sm" type="submit">Remove</button>
@@ -68,7 +65,9 @@
 {
     <div class="card">
         <h2>Operator: add an app-credential pair</h2>
-        <p class="muted">Uses the global Graph/Google app credentials (app_default), addressed by raw email, not user OAuth grants.</p>
+        <p class="muted">Uses the app-only credentials under Settings (a Google service account with domain-wide
+            delegation and a Microsoft app registration) and addresses each mailbox by its email, so nobody signs in.
+            The pair starts paused so you can preview it with a dry run first.</p>
         <form asp-action="Add" method="post">
             @Html.AntiForgeryToken()
             <div class="field"><label>Name</label><input type="text" name="name" placeholder="work &lt;-&gt; family" /></div>

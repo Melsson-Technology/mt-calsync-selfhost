@@ -4,9 +4,8 @@ using SelfHost.MTCalSync.Models;
 
 namespace SelfHost.MTCalSync.Controllers
 {
-	// The signed-in user's home: subscription/trial state (banner or blocking card
-	// per the entitlement), connected accounts (with reconnect nudges), and sync
-	// pairs with their latest run health. Admins get a link to the operator pages.
+	// The operator's home: the setup guide until a pair exists, connected accounts (with
+	// reconnect nudges), and every sync pair with its latest run health.
 	public class DashboardController : Controller
 	{
 		public IActionResult Index()
@@ -18,7 +17,10 @@ namespace SelfHost.MTCalSync.Controllers
 			var rows = new List<PairRow>();
 			var em = new EventMapping();
 			var dl = new DeadLetter();
-			foreach (var p in new SyncPair().listByUser(userId))
+			// All pairs, not the user's: a self-host install has exactly one operator, and
+			// pairs from the operator form, `add-pair` and Shared calendars carry no user,
+			// so a per-user list hid them and showed the setup guide over running pairs.
+			foreach (var p in new SyncPair().listAll())
 			{
 				var l = new ProviderConnection().getById(p.leftConnectionID);
 				var r = new ProviderConnection().getById(p.rightConnectionID);

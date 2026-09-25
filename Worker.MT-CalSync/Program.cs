@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Text;
 using Core.MTCalSync;
 
 namespace Worker.MTCalSync
@@ -14,7 +16,7 @@ namespace Worker.MTCalSync
 	//   dotnet Worker.MT-CalSync.dll status | history --pair N | resync --pair N
 	//   dotnet Worker.MT-CalSync.dll pause --pair N | resume --pair N
 	//   dotnet Worker.MT-CalSync.dll dead-letters --pair N [--resolve M | --resolve-all]
-	//   dotnet Worker.MT-CalSync.dll test-email | set-secret <name> <value>
+	//   dotnet Worker.MT-CalSync.dll test-email | set-secret <name> | set-admin-password
 	public class Program
 	{
 		public static async Task<int> Main(string[] args)
@@ -53,7 +55,8 @@ namespace Worker.MTCalSync
 						if (pair > 0)
 						{
 							var run = await SyncEngine.RunPairById(pair, "manual", dry, force, full);
-							return run != null && (run.status == "failed" || run.status == "aborted_circuit_breaker") ? 2 : 0;
+							if (run == null) return 1;   // no such pair (RunPairById has said so)
+							return run.status == "failed" || run.status == "aborted_circuit_breaker" ? 2 : 0;
 						}
 						// Default tick = the scheduler (due pairs, concurrency, backoff, account
 						// gates); --sequential keeps the simple run-everything loop for debugging.
@@ -85,10 +88,10 @@ namespace Worker.MTCalSync
 						CliCommands.Resync(RequirePair(a)); return 0;
 
 					case "pause":
-						CliCommands.Pause(RequirePair(a), true); return 0;
+						return CliCommands.Pause(RequirePair(a), true) ? 0 : 1;
 
 					case "resume":
-						CliCommands.Pause(RequirePair(a), false); return 0;
+						return CliCommands.Pause(RequirePair(a), false) ? 0 : 1;
 
 					case "remove-pair":
 					{
@@ -107,14 +110,25 @@ namespace Worker.MTCalSync
 						CliCommands.DeadLetters(a.Long("pair"), a.Long("resolve"), a.Flag("resolve-all")); return 0;
 
 					case "test-email":
-						CliCommands.TestEmail(); return 0;
+						return CliCommands.TestEmail() ? 0 : 1;
 
+					// Secrets are read from a prompt (or stdin) rather than taken as arguments:
+					// the documented `mtcs` alias runs through sudo, which records the whole
+					// command line in the system log. A value on the command line still works,
+					// for compatibility, but the docs no longer show it.
 					case "set-secret":
-						if (args.Length < 3) { Console.WriteLine("Usage: set-secret <name> <value>"); return 1; }
-						return CliCommands.SetSecret(args[1], args[2]) ? 0 : 1;
+					{
+						if (args.Length < 2 || args[1].StartsWith("--")) { Console.WriteLine("Usage: set-secret <name>   (you'll be prompted for the value)"); return 1; }
+						string value = args.Length >= 3 ? args[2] : ReadSecret($"Value for {args[1]}: ");
+						return CliCommands.SetSecret(args[1], value) ? 0 : 1;
+					}
 
 					case "set-admin-password":
-						return CliCommands.SetAdminPassword(a.Str("password")) ? 0 : 1;
+					{
+						string password = a.Str("password");
+						if (string.IsNullOrEmpty(password)) password = ReadSecret("New operator password: ", confirm: true);
+						return CliCommands.SetAdminPassword(password) ? 0 : 1;
+					}
 
 					case "migrate-secrets":
 						return CliCommands.MigrateSecrets() ? 0 : 1;
@@ -138,23 +152,93 @@ namespace Worker.MTCalSync
 			return p;
 		}
 
+		// Piped input is read as one line, so a script can run
+		//   printf '%s\n' "$PW" | mtcs set-admin-password
+		// At a terminal the value is typed without echo (twice when confirm is set).
+		private static string ReadSecret(string prompt, bool confirm = false)
+		{
+			if (Console.IsInputRedirected) return (Console.In.ReadLine() ?? string.Empty).TrimEnd('\r');
+			string first = ReadHidden(prompt);
+			if (!confirm || first.Length == 0) return first;
+			if (ReadHidden("Again, to confirm: ") == first) return first;
+			Console.WriteLine("The two entries didn't match.");
+			return string.Empty;
+		}
+
+		// Echo goes off before the prompt appears (stty) and the line is read straight from
+		// /dev/tty, the way sudo reads its own password. Console.ReadKey only turns echo off
+		// while it is waiting for a key, so input that arrived just ahead of the first call
+		// (a paste, or a script answering the prompt the instant it showed) was echoed.
+		private static string ReadHidden(string prompt)
+		{
+			if (!OperatingSystem.IsWindows() && SetTerminalEcho(false))
+			{
+				ConsoleCancelEventHandler restoreOnCtrlC = (_, _) => SetTerminalEcho(true);
+				Console.CancelKeyPress += restoreOnCtrlC;
+				try
+				{
+					Console.Error.Write(prompt);
+					using var tty = new FileStream("/dev/tty", FileMode.Open, FileAccess.Read);
+					var bytes = new List<byte>();
+					for (int b = tty.ReadByte(); b != -1 && b != '\n'; b = tty.ReadByte()) bytes.Add((byte)b);
+					return Encoding.UTF8.GetString(bytes.ToArray()).TrimEnd('\r');
+				}
+				catch (IOException) { }   // no usable /dev/tty: fall through to per-key reads
+				finally
+				{
+					SetTerminalEcho(true);
+					Console.CancelKeyPress -= restoreOnCtrlC;
+					Console.Error.WriteLine();
+				}
+			}
+
+			Console.Error.Write(prompt);
+			var sb = new StringBuilder();
+			while (true)
+			{
+				var key = Console.ReadKey(intercept: true);
+				if (key.Key == ConsoleKey.Enter) break;
+				if (key.Key == ConsoleKey.Backspace) { if (sb.Length > 0) sb.Length--; continue; }
+				if (!char.IsControl(key.KeyChar)) sb.Append(key.KeyChar);
+			}
+			Console.Error.WriteLine();
+			return sb.ToString();
+		}
+
+		// stty works on its standard input, which it inherits from us: the terminal.
+		private static bool SetTerminalEcho(bool on)
+		{
+			try
+			{
+				using var p = Process.Start(new ProcessStartInfo("stty", on ? "echo" : "-echo") { UseShellExecute = false });
+				if (p == null) return false;
+				p.WaitForExit(5000);
+				return p.HasExited && p.ExitCode == 0;
+			}
+			catch { return false; }
+		}
+
 		private static void Usage()
 		{
 			Console.WriteLine("Usage: Worker.MT-CalSync <command> [--flags]");
-			Console.WriteLine("  setup-check                              validate creds, DB, calendars, SMTP");
+			Console.WriteLine("  setup-check                              check the DB and settings, and live-read each paired calendar");
 			Console.WriteLine("  add-pair --m365-email X --google-email Y [--name N] [--m365-cal C] [--google-cal C] [--direction bidirectional] [--fidelity full_detail] [--recurrence instance|series]");
-			Console.WriteLine("  list-pairs | status | history --pair N [--limit K]");
+			Console.WriteLine("                                           creates an app-credential pair, paused");
+			Console.WriteLine("  list-pairs");
+			Console.WriteLine("  status");
+			Console.WriteLine("  history --pair N [--limit K]");
 			Console.WriteLine("  inspect --pair N [--subject TEXT]        read-only: dump both sides' in-window events + provenance");
 			Console.WriteLine("  purge-mirror --pair N --provider P --id X delete a managed mirror event + tombstone its mapping (guarded)");
 			Console.WriteLine("  sync [--pair N] [--full] [--dry-run] [--force]");
 			Console.WriteLine("  resync --pair N | pause --pair N | resume --pair N");
-			Console.WriteLine("  remove-pair --pair N                     delete a pair + the events it mirrored onto M365");
+			Console.WriteLine("  remove-pair --pair N                     delete a pair and the events it mirrored, on both calendars");
 			Console.WriteLine("  sweep-strays --pair N --dead M           delete stamped mirrors of DEAD pair M from live pair N's calendars");
 			Console.WriteLine("  repair-chains --pair N [--apply]         find/dismantle mirror-of-mirror chains (origin is itself a stamped mirror)");
 			Console.WriteLine("  dead-letters --pair N [--resolve M | --resolve-all]");
-			Console.WriteLine("  test-email | set-secret <name> <value>");
-			Console.WriteLine("  set-admin-password --password P          set the self-host portal operator password");
-			Console.WriteLine("  migrate-secrets                          re-encrypt legacy stored secrets under DataEncryptionKey");
+			Console.WriteLine("  test-email                               send a test alert through the SMTP settings");
+			Console.WriteLine("  set-secret <name>                        store a secret, encrypted (prompts for the value)");
+			Console.WriteLine("  set-admin-password                       set the self-host portal operator password (prompts)");
+			Console.WriteLine("  migrate-secrets                          check that every stored secret is in the current (v2) format");
 		}
 	}
 

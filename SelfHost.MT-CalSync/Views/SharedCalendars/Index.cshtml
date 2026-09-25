@@ -4,10 +4,22 @@
 }
 
 <h1>Shared calendars</h1>
-<p class="muted" style="margin-bottom:16px">
-    Google calendars visible to <strong>@Model.GoogleEmail</strong>. Check one to mirror its events into your
-    Microsoft&nbsp;365 primary calendar (<strong>@Model.M365Email</strong>). One-way: Google&nbsp;→&nbsp;M365.
-</p>
+@* The personalised sentence only when both addresses are known: with nothing set up
+   it rendered as "visible to ." and "primary calendar ()". *@
+@if (!string.IsNullOrEmpty(Model.GoogleEmail) && !string.IsNullOrEmpty(Model.M365Email))
+{
+    <p class="muted" style="margin-bottom:16px">
+        Google calendars visible to <strong>@Model.GoogleEmail</strong>. Check one to mirror its events into your
+        Microsoft&nbsp;365 primary calendar (<strong>@Model.M365Email</strong>). One-way: Google&nbsp;→&nbsp;M365.
+    </p>
+}
+else
+{
+    <p class="muted" style="margin-bottom:16px">
+        Mirror a Google calendar that's shared with you into your Microsoft&nbsp;365 primary calendar.
+        One-way: Google&nbsp;→&nbsp;M365. It works through the app-only credentials under Settings.
+    </p>
+}
 
 @if (!string.IsNullOrEmpty(Model.Error))
 {

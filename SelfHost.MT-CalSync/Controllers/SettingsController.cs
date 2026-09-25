@@ -6,8 +6,8 @@ using SelfHost.MTCalSync.Models;
 namespace SelfHost.MTCalSync.Controllers
 {
 	// /Settings — the credentials + config form. Secrets (Graph client secret, Google
-	// service-account JSON, SMTP password) are stored AES-encrypted in the DB settings
-	// table and never rendered back to the page (only a masked status). Plain config is
+	// service-account JSON, SMTP password, OAuth client secrets) are stored AES-encrypted
+	// in the DB settings table and never rendered back in full (see Mask). Plain config is
 	// stored plaintext and resolves DB-first, so the UI is the source of truth.
 	[Authorize(Roles = "Admin")]
 	public class SettingsController : Controller
@@ -87,17 +87,22 @@ namespace SelfHost.MTCalSync.Controllers
 			if (!string.IsNullOrWhiteSpace(googleOAuthClientSecret))
 				s.saveByName("GoogleOAuthClientSecret", Encryption.Encrypt(googleOAuthClientSecret.Trim()));
 
-			TempData["Info"] = "Settings saved. Use the dashboard's “Test credentials” to validate live access.";
+			TempData["Info"] = "Settings saved. Use Test credentials on the System page to check them.";
 			return RedirectToAction("Index");
 		}
 
 		private static string Trim(string? v) => (v ?? string.Empty).Trim();
 
+		// The last four characters tell you which API key or client secret is stored, at a
+		// negligible cost for a long random value. A short one is usually a password a
+		// person chose (SMTP), where four characters can be half of it, so that shows only
+		// that something is set.
+		private const int MinLengthToHint = 20;
+
 		private static string Mask(string v)
 		{
 			if (string.IsNullOrWhiteSpace(v)) return "not set";
-			string last4 = v.Length >= 4 ? v.Substring(v.Length - 4) : v;
-			return "configured: ••••" + last4;
+			return v.Length >= MinLengthToHint ? "configured: ••••" + v.Substring(v.Length - 4) : "configured";
 		}
 
 		private static string JsonStatus(string v) =>

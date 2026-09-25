@@ -23,7 +23,8 @@ The self-host portal has exactly one identity. `PortalAuth` resolves every reque
 customer 1 / user 1, and `IsAdmin()` returns `true` unconditionally - there is no Viewer,
 no Editor, and no second account to escalate from. Anyone who can sign in can:
 
-- read and change every setting, including the stored provider credentials
+- change every setting and replace the stored provider credentials (the portal never
+  shows a secret in full, but it doesn't need to: an operator can already use them)
 - see every connected calendar and every event the engine has mirrored
 - create, pause and tear down pairs, which deletes mirrored events
 
@@ -46,8 +47,9 @@ constrain:
 - A **Microsoft Graph app registration with application permissions** reads and writes
   calendars tenant-wide, not only the ones a pair names.
 
-Grant the narrowest calendar scopes that work, keep the service-account JSON at `0600`,
-and prefer delegated OAuth wherever an org-wide credential is not actually needed. "The
+Grant the narrowest calendar scopes that work, keep a service-account key file at `0600`
+owned by the `mtcalsync` service account (the only account that needs to read it), and
+prefer delegated OAuth wherever an org-wide credential is not actually needed. "The
 service account can reach a mailbox I did not configure a pair for" is how domain-wide
 delegation works, not a flaw in this software.
 
@@ -80,17 +82,21 @@ deliberate loop-safety, not data loss - edit at the origin.
 
 ### Busy-only fidelity limits what is written, not what is read
 
-Busy-only pairs write opaque blocks that carry no title, location or description. The
-engine still reads full event detail from the origin in order to decide what to write, and
-that detail passes through the process and its logs at debug verbosity. Busy-only is a
-control over what reaches the *far calendar*, not a guarantee about what the engine sees.
+Busy-only pairs write opaque blocks that carry no location or description, and no title
+unless the pair's "still copy the event title" option is on. The engine still reads full event
+detail from the origin in order to decide what to write, so that detail passes through the
+process, and event titles can be kept in the dead-letter queue and printed by `inspect`
+and by a dry run. Busy-only is a control over what reaches the *far calendar*, not a
+guarantee about what the engine sees.
 
-### There is no inbound callback surface
+### There are no webhooks to secure
 
-The engine polls; it does not subscribe to provider webhooks. There is no public callback
-endpoint to secure, no subscription renewal lifecycle, and nothing on the internet needs to
-reach the worker at all. The portal binds `http://127.0.0.1:5091` and expects nginx in
-front of it for TLS. If you bind it to a public interface, that is your decision to defend.
+The engine polls; it does not subscribe to provider webhooks. There is no subscription
+renewal lifecycle, and nothing on the internet needs to reach the worker at all. The
+portal's only anonymous endpoints are the sign-in page, `/healthz`, `robots.txt`, and the
+two OAuth redirect callbacks, which act only on a state value the portal itself sealed in
+the last 15 minutes. The portal binds `http://127.0.0.1:5091` and expects nginx in front
+of it for TLS. If you bind it to a public interface, that is your decision to defend.
 
 ---
 
@@ -107,8 +113,10 @@ front of it for TLS. If you bind it to a public interface, that is your decision
 
 ## Secrets at rest
 
-OAuth refresh tokens, the Graph client secret, the Google service-account JSON, and the
-SMTP password are encrypted with **AES-256-GCM** before being written to the database. The
+OAuth refresh and access tokens, both OAuth client secrets, the Graph client secret, the
+Google service-account JSON, and the SMTP password are encrypted with **AES-256-GCM**
+before being written to the database. Client and tenant IDs are stored in plain text, and
+so is a service-account key kept as a file rather than pasted into Settings. The
 key is `DataEncryptionKey` in `settings.xml` - base64 of 32 random bytes, generated per
 deployment with `openssl rand -base64 32`. The file is mode `0640`, owned by the service
 account.

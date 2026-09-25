@@ -75,7 +75,11 @@ namespace Core.MTCalSync
 				var s = SyncRun.start(_pair.pairID, trigger, "incremental"); s.finish("skipped_locked"); return s;
 			}
 
-			var run = SyncRun.start(_pair.pairID, trigger, "incremental");
+			// A dry run gets an unsaved run: a recorded one showed up as the pair's latest
+			// "success" on the Dashboard and in history, for a sync that applied nothing.
+			var run = _dryRun
+				? new SyncRun { pairID = _pair.pairID, triggerType = "dry-run", syncType = "incremental", status = "running" }
+				: SyncRun.start(_pair.pairID, trigger, "incremental");
 			var pendingTokens = new Dictionary<string, (string? token, bool wasFull)>();
 			try
 			{
@@ -93,7 +97,7 @@ namespace Core.MTCalSync
 					try { changes = await _providers[side].GetChangesAsync(_window, state, forceFull); }
 					catch (ProviderException pe)
 					{
-						state.recordFailure(pe.Message);
+						if (!_dryRun) state.recordFailure(pe.Message);   // feeds the scheduler's backoff
 						throw;   // abort the run; tokens for this side are not advanced
 					}
 
@@ -111,20 +115,13 @@ namespace Core.MTCalSync
 				// exception's mirror master must exist first (stable sort preserves order).
 				ops = ops.OrderBy(o => o.IsInstanceOp ? 1 : 0).ToList();
 
-				// ── circuit breaker ──────────────────────────────────────────
 				int destructive = ops.Count(o => o.Kind == OpKind.Create || o.Kind == OpKind.Delete || o.Kind == OpKind.InstanceCancel);
-				if (destructive > _pair.maxWritesPerRun && !_force)
-				{
-					string msg = $"Circuit breaker: {destructive} create/delete ops exceed maxWritesPerRun={_pair.maxWritesPerRun}. " +
-								 "Nothing applied. Re-run with --force if this is expected.";
-					Common.audit($"pair={_pair.pairID} op=circuit-breaker planned={destructive} result=aborted");
-					run.errorText = msg; run.finish("aborted_circuit_breaker");
-					if (new SyncPair().shouldAlert(_pair.pairID))
-						Email.SendAlert($"MT-CalSync circuit breaker (pair {_pair.pairID})", msg + "\n\n" + run.Summary());
-					return run;
-				}
+				bool overBreaker = destructive > _pair.maxWritesPerRun && !_force;
 
 				// ── dry run: show the plan, touch nothing ────────────────────
+				// Ahead of the circuit breaker on purpose. A preview is how an operator
+				// finds out whether a pair would trip it, so it has to print the plan
+				// either way, and a preview must never page anyone.
 				if (_dryRun)
 				{
 					Console.WriteLine($"DRY RUN — pair {_pair.pairID} ({_pair.name}): {ops.Count} op(s)");
@@ -134,7 +131,22 @@ namespace Core.MTCalSync
 						string when = o.IsInstanceOp ? o.OrigStartUtc.ToString("u") : (o.Unit?.StartUtc.ToString("u") ?? "");
 						Console.WriteLine($"  {o.Kind,-14} {o.SrcSide}->{o.DstSide}  {label}  start={when}");
 					}
+					if (overBreaker)
+						Console.WriteLine($"Note: {destructive} create/delete ops exceed maxWritesPerRun={_pair.maxWritesPerRun}, so a live run " +
+							$"would stop at the circuit breaker and apply nothing. If this is expected, run `sync --pair {_pair.pairID} --force` once.");
 					run.finish("success");
+					return run;
+				}
+
+				// ── circuit breaker ──────────────────────────────────────────
+				if (overBreaker)
+				{
+					string msg = $"Circuit breaker: {destructive} create/delete ops exceed maxWritesPerRun={_pair.maxWritesPerRun}. " +
+								 "Nothing applied. Re-run with --force if this is expected.";
+					Common.audit($"pair={_pair.pairID} op=circuit-breaker planned={destructive} result=aborted");
+					run.errorText = msg; run.finish("aborted_circuit_breaker");
+					if (new SyncPair().shouldAlert(_pair.pairID))
+						Email.SendAlert($"MT-CalSync circuit breaker (pair {_pair.pairID})", msg + "\n\n" + run.Summary());
 					return run;
 				}
 
@@ -164,7 +176,10 @@ namespace Core.MTCalSync
 				run.errorText = nre.Message;
 				run.finish("skipped_auth");
 				Common.audit($"pair={_pair.pairID} op=auth result=skipped_auth account={nre.OAuthAccountId}");
-				NotifyOwnerReauth(nre);
+				// A dry run is someone at a terminal asking what would happen: tell them
+				// here rather than emailing the owner about a preview.
+				if (_dryRun) Console.WriteLine($"DRY RUN stopped: {nre.Message}");
+				else NotifyOwnerReauth(nre);
 				return run;
 			}
 			catch (Exception ex)
@@ -172,17 +187,21 @@ namespace Core.MTCalSync
 				run.errorText = ex.Message;
 				run.finish("failed");
 				Common.writeToLog($"FATAL sync pair {_pair.pairID}:", ex);
+				// Without this a failed dry run printed nothing at all: the reason went only
+				// to the log file, and the operator's first sign of it was the alert email.
+				if (_dryRun) Console.WriteLine($"DRY RUN failed: {ex.Message}");
 				// Transient provider conditions — 429 throttling, 5xx / "request queue
 				// full" overload, transport retry-exhaustion — are ACCOUNT-wide (quotas
 				// are per account, not per pair) and self-healing. Park the affected
 				// account(s) briefly and stay QUIET: the scheduler escalates to the
 				// owner only once failures persist (>=3 consecutive), so a single
 				// Microsoft/Google blip never pages anyone. Only a genuine
-				// (non-transient) failure — a real bug — alerts the operator at once.
+				// (non-transient) failure — a real bug — alerts the operator at once,
+				// and never for a dry run.
 				if (ex is ProviderException { IsTransient: true } transient)
 					BackoffAccounts(transient.RetryAfterSeconds, ex.Message);
-				else if (new SyncPair().shouldAlert(_pair.pairID))
-					Email.SendAlert($"MT-CalSync FAILED (pair {_pair.pairID})", ex.ToString());
+				else if (!_dryRun && new SyncPair().shouldAlert(_pair.pairID))
+					Email.SendAlert($"MT-CalSync FAILED (pair {_pair.pairID})", FailureAlertBody(ex));
 				return run;
 			}
 			finally
@@ -190,6 +209,16 @@ namespace Core.MTCalSync
 				if (!_dryRun) lockRow.release();
 			}
 		}
+
+		// The operator reads this in a mail client, often on a phone. The body used to be
+		// the raw stack trace, which buried the one line that says what's wrong, so lead
+		// with that and what happens next, and keep the trace at the end for a bug report.
+		private string FailureAlertBody(Exception ex) =>
+			$"Sync pair {_pair.pairID} (\"{_pair.name}\") failed at {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC.\n\n" +
+			$"{ex.Message}\n\n" +
+			"The pair tries again on its normal schedule, spacing the attempts out while it keeps failing. " +
+			$"To see its recent runs, use `history --pair {_pair.pairID}` on the worker CLI.\n\n" +
+			"Technical details, for a bug report:\n" + ex;
 
 		// Set backoffUntil on this pair's delegated account(s) after a transient
 		// provider condition (429 / 5xx / transport retry-exhaustion). The op prefix
@@ -285,7 +314,7 @@ namespace Core.MTCalSync
 					Common.audit($"pair={_pair.pairID} op=rekey side={side} mapping={churned.mappingID} " +
 						$"oldId={churned.EventIdForSide(side)} newId={c.Id} uid={c.ICalUid} result=ok");
 					churned.SetSide(side, c.Id, c.ICalUid, c.Etag);
-					churned.save();
+					if (!_dryRun) churned.save();   // classification runs in a dry run too; it must not write
 					run.adoptedCount++;
 					m = churned;
 				}
@@ -342,7 +371,7 @@ namespace Core.MTCalSync
 				var adopted = BuildMapping(side, c, dst, existing, u);
 				adopted.projectedHash = existing.Stamp.Managed ? existing.Stamp.Hash : u.Hash;
 				adopted.mirrorVersion = existing.Stamp.Version;
-				adopted.save();
+				if (!_dryRun) adopted.save();
 				run.adoptedCount++;
 				if (u.Hash != adopted.projectedHash)
 					return new SyncOp { Kind = OpKind.Update, SrcSide = side, DstSide = dst, SourceId = c.Id, Unit = u, Source = c, Mapping = adopted };
@@ -411,12 +440,12 @@ namespace Core.MTCalSync
 					mirrorVersion = c.Stamp.Version
 				};
 				rebuilt.SetSide(side, c.Id, c.ICalUid, c.Etag);   // the mirror side
-				rebuilt.save();
+				if (!_dryRun) rebuilt.save();
 				run.adoptedCount++; run.echoSkippedCount++;
 				return null;
 			}
 
-			if (!string.IsNullOrEmpty(c.Etag) && m.EtagForSide(side) != c.Etag)
+			if (!_dryRun && !string.IsNullOrEmpty(c.Etag) && m.EtagForSide(side) != c.Etag)
 				m.refreshMirrorEtag(side, c.Etag);   // benign provider bump — converge, no write
 			run.echoSkippedCount++;
 			return null;

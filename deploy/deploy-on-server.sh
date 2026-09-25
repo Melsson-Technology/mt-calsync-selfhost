@@ -21,6 +21,11 @@ swap() {   # swap <publish-dir-name>
     [[ -d "$STAGE/$name" ]] || return 0
     if [[ -d "$APP_HOME/$name" ]]; then rm -rf "$APP_HOME/$name.old"; mv "$APP_HOME/$name" "$APP_HOME/$name.old"; fi
     mv "$STAGE/$name" "$APP_HOME/$name"
+    # The worker and portal write logs/ next to their assembly. Left behind in .old, the
+    # log history was deleted by the deploy after next, so carry it across.
+    if [[ -d "$APP_HOME/$name.old/logs" && ! -e "$APP_HOME/$name/logs" ]]; then
+        mv "$APP_HOME/$name.old/logs" "$APP_HOME/$name/logs"
+    fi
 }
 
 systemctl stop mtcalsync-selfhost.service 2>/dev/null || true
@@ -35,6 +40,22 @@ cp -r "$STAGE/deploy/."  "$APP_HOME/deploy/"  2>/dev/null || true
 ln -sf /etc/mtcalsync/settings.xml "$APP_HOME/worker-publish/settings.xml"
 ln -sf /etc/mtcalsync/settings.xml "$APP_HOME/selfhost-publish/settings.xml"
 
-chown -R mtcalsync:mtcalsync "$APP_HOME"
+# Ownership and modes are set here, never taken from the bundle. Root's tar keeps the
+# modes a bundle recorded, and a bundle built on Windows records every file as 0666 and
+# every directory as 0777: world-writable code, run by the account that can read the
+# encryption key. The service account owns only its publish dirs, which it writes logs
+# into. Everything else stays root's, because root runs the scripts kept under deploy/.
+chown root:root "$APP_HOME"
+chmod 0755 "$APP_HOME"
+for d in worker-publish selfhost-publish worker-publish.old selfhost-publish.old; do
+    [[ -d "$APP_HOME/$d" ]] || continue
+    chown -R mtcalsync:mtcalsync "$APP_HOME/$d"
+    find "$APP_HOME/$d" -type d -exec chmod 0750 {} +
+    find "$APP_HOME/$d" -type f -exec chmod 0640 {} +
+done
+chown -R root:root "$APP_HOME/deploy" "$APP_HOME/scripts"
+find "$APP_HOME/deploy" "$APP_HOME/scripts" -type d -exec chmod 0755 {} +
+find "$APP_HOME/deploy" "$APP_HOME/scripts" -type f -exec chmod 0644 {} +
+
 systemctl start mtcalsync-selfhost.service
 echo "Deployed. worker + self-host portal swapped; previous kept as *.old."

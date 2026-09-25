@@ -37,9 +37,23 @@
         .nav a.active::after { content:""; position:absolute; left:11px; right:11px; bottom:0;
                                height:2px; border-radius:2px 2px 0 0; background:var(--accent); }
         .nav .spacer { flex:1; }
+        .nav .nav-user { color:#94a3b8; padding:0 11px; }
         .nav form { margin:0 0 0 10px; }
         .nav .btn { background:rgba(148,163,184,.12); border-color:transparent; color:#cbd5e1; }
         .nav .btn:hover { background:rgba(148,163,184,.22); color:#fff; }
+
+        /* The one-row bar measures about 865px with every operator link, so on anything
+           narrower the whole page scrolled sideways (472px on a 393px phone). Below 920px,
+           which leaves room for wider platform fonts, the brand and sign-out keep the top
+           row and the links wrap onto rows beneath it; the spacer becomes the line break. */
+        @@media (max-width: 920px) {
+            .nav { flex-wrap:wrap; height:auto; padding:0 14px; }
+            .nav .brand { height:48px; margin-right:auto; }
+            .nav .nav-user, .nav form { order:1; }
+            .nav .spacer { order:2; flex:0 0 100%; height:0; }
+            .nav a:not(.brand) { order:3; height:40px; padding:0 9px; }
+            .nav a.active::after { left:9px; right:9px; }
+        }
 
         /* ── page scaffold ───────────────────────────────────────────────── */
         .container { max-width:980px; margin:30px auto 60px; padding:0 22px; }
@@ -52,8 +66,10 @@
                border-radius:5px; font-size:12px; color:var(--ink); }
 
         /* ── cards ───────────────────────────────────────────────────────── */
+        /* overflow-x: a wide table (System's pairs grid has ten columns) scrolls inside its
+           card on a narrow screen instead of widening the whole page. */
         .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
-                padding:20px 22px; margin:16px 0 18px;
+                padding:20px 22px; margin:16px 0 18px; overflow-x:auto;
                 box-shadow:0 1px 2px rgba(15,23,42,.05); }
         .card.warn { border-color:var(--warn-line); background:var(--warn-bg); }
         .card.danger { border-color:var(--danger-line); }
@@ -85,7 +101,7 @@
         /* ── badges ──────────────────────────────────────────────────────── */
         .badge { display:inline-block; padding:2px 9px; border-radius:999px; font-size:11px;
                  font-weight:650; letter-spacing:.02em; border:1px solid var(--off-line);
-                 background:var(--off-bg); color:var(--off); vertical-align:middle; }
+                 background:var(--off-bg); color:var(--off); vertical-align:middle; white-space:nowrap; }
         .badge.ok { background:var(--ok-bg); color:var(--ok); border-color:var(--ok-line); }
         .badge.warn { background:var(--warn-bg); color:var(--warn); border-color:var(--warn-line); }
         .badge.off { background:var(--off-bg); color:var(--off); border-color:var(--off-line); }
@@ -143,7 +159,7 @@
             <a class="@(ctrl=="SharedCalendars"?"active":"")" asp-controller="SharedCalendars" asp-action="Index">Shared calendars</a>
         }
         <span class="spacer"></span>
-        <span style="color:#94a3b8;padding:0 11px">@User.Identity?.Name</span>
+        <span class="nav-user">@User.Identity?.Name</span>
         <form asp-controller="Auth" asp-action="Logout" method="post">
             @Html.AntiForgeryToken()
             <button class="btn btn-sm" type="submit">Sign out</button>

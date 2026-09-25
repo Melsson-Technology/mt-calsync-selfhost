@@ -12,10 +12,24 @@ namespace SelfHost.MTCalSync.Controllers
 	[Authorize(Roles = "Admin")]
 	public class SharedCalendarsController : Controller
 	{
+		// The mirrors this page creates are app-credential pairs (EnableSharedCalendarMirror
+		// makes app_default connections), so without the service account and the app
+		// registration every one of them fails on its first sync. Say so up front instead.
+		private const string AppOnlyMissing =
+			"Shared calendars mirrors through the app-only credentials: a Google service account with " +
+			"domain-wide delegation and a Microsoft app registration. Add both under Settings to use this page " +
+			"(_docs/PROVIDER-SETUP.md, Option B, shows how).";
+
+		private static bool AppOnlyCredentialsSet() =>
+			!string.IsNullOrWhiteSpace(Settings.GraphTenantId) && !string.IsNullOrWhiteSpace(Settings.GraphClientId)
+			&& !string.IsNullOrWhiteSpace(Settings.EffectiveGraphClientSecret)
+			&& !string.IsNullOrWhiteSpace(Settings.EffectiveGoogleServiceAccountJson);
+
 		[HttpGet]
 		public async Task<IActionResult> Index()
 		{
 			var vm = new SharedCalendarsViewModel();
+			if (!AppOnlyCredentialsSet()) { vm.Error = AppOnlyMissing; return View(vm); }
 			var (m365, gConn, error) = Resolve();
 			vm.M365Email = m365;
 			vm.GoogleEmail = gConn?.principalEmail ?? string.Empty;
@@ -52,6 +66,7 @@ namespace SelfHost.MTCalSync.Controllers
 		[HttpPost, ValidateAntiForgeryToken]
 		public async Task<IActionResult> Toggle(string calendarId, string summary, bool enable)
 		{
+			if (enable && !AppOnlyCredentialsSet()) { TempData["Error"] = AppOnlyMissing; return RedirectToAction("Index"); }
 			var (m365, gConn, error) = Resolve();
 			if (error != null) { TempData["Error"] = error; return RedirectToAction("Index"); }
 			if (string.IsNullOrWhiteSpace(calendarId)) { TempData["Error"] = "Missing calendar id."; return RedirectToAction("Index"); }
