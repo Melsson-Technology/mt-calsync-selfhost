@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# deploy-on-server.sh — unpack a build tarball and atomically swap it into
+# deploy-on-server.sh: unpack a build tarball and swap it into
 # /opt/mtcalsync. Copy mtcalsync-engine.tar.gz to the server, then run as root:
 #
 #   sudo ./deploy-on-server.sh mtcalsync-engine.tar.gz
@@ -16,9 +16,8 @@ trap 'rm -rf "$STAGE"' EXIT
 
 tar -xzf "$TARBALL" -C "$STAGE"
 
-# A self-contained build carries the .NET runtime (libcoreclr.so ships only with one). A
-# framework-dependent build needs the ASP.NET Core 10 runtime installed, so check for it
-# before anything is swapped, not after the portal fails to start.
+# A self-contained build carries the .NET runtime (only it ships libcoreclr.so). Otherwise
+# check for the ASP.NET Core 10 runtime before anything is swapped.
 if [[ -f "$STAGE/selfhost-publish/libcoreclr.so" ]]; then
     echo "==> self-contained build: no .NET runtime needed on this server"
 elif ! dotnet --list-runtimes 2>/dev/null | grep -q "Microsoft.AspNetCore.App 10\."; then
@@ -33,20 +32,19 @@ swap() {   # swap <publish-dir-name>
     [[ -d "$STAGE/$name" ]] || return 0
     if [[ -d "$APP_HOME/$name" ]]; then rm -rf "$APP_HOME/$name.old"; mv "$APP_HOME/$name" "$APP_HOME/$name.old"; fi
     mv "$STAGE/$name" "$APP_HOME/$name"
-    # The worker and portal write logs/ next to their assembly. Left behind in .old, the
-    # log history was deleted by the deploy after next, so carry it across.
+    # The apps write logs/ next to their assembly. Carry it across, or the next deploy's
+    # .old cleanup deletes it.
     if [[ -d "$APP_HOME/$name.old/logs" && ! -e "$APP_HOME/$name/logs" ]]; then
         mv "$APP_HOME/$name.old/logs" "$APP_HOME/$name/logs"
     fi
 }
 
-# The sync timer is paused for the swap, so no run starts against a half-installed build or
-# a unit that doesn't match it yet. It is restarted at the end only if it was running.
+# Pause the sync timer so no run starts against a half-installed build. It restarts at the
+# end only if it was running.
 timer_was_active=0
 systemctl is-active --quiet mtcalsync-sync.timer && timer_was_active=1
 systemctl stop mtcalsync-sync.timer 2>/dev/null || true
-# A run the timer started just before is still going; let it finish (up to ten minutes, the
-# sync lease) before its files move.
+# Let a run already in progress finish (up to the ten-minute sync lease) before its files move.
 for _ in $(seq 1 600); do
     case "$(systemctl show -p ActiveState --value mtcalsync-worker@sync.service 2>/dev/null)" in
         activating|active|deactivating|reloading) sleep 1 ;;
@@ -65,11 +63,10 @@ cp -r "$STAGE/deploy/."  "$APP_HOME/deploy/"  2>/dev/null || true
 ln -sf /etc/mtcalsync/settings.xml "$APP_HOME/worker-publish/settings.xml"
 ln -sf /etc/mtcalsync/settings.xml "$APP_HOME/selfhost-publish/settings.xml"
 
-# Ownership and modes are set here, never taken from the bundle. Root's tar keeps the
-# modes a bundle recorded, and a bundle built on Windows records every file as 0666 and
-# every directory as 0777: world-writable code, run by the account that can read the
-# encryption key. The service account owns only its publish dirs, which it writes logs
-# into. Everything else stays root's, because root runs the scripts kept under deploy/.
+# Set ownership and modes here, never from the bundle: root's tar keeps recorded modes, and a
+# Windows-built bundle records 0666/0777, which would make the code world-writable. The service
+# account owns only its publish dirs (it writes logs there); the rest is root's, because root
+# runs the scripts under deploy/.
 chown root:root "$APP_HOME"
 chmod 0755 "$APP_HOME"
 for d in worker-publish selfhost-publish worker-publish.old selfhost-publish.old; do
@@ -78,23 +75,23 @@ for d in worker-publish selfhost-publish worker-publish.old selfhost-publish.old
     find "$APP_HOME/$d" -type d -exec chmod 0750 {} +
     find "$APP_HOME/$d" -type f -exec chmod 0640 {} +
 done
-# The units run each app's native launcher, which must stay executable. A bundle made on
-# Windows records no execute bit at all.
+# The units run each app's native launcher, which needs the execute bit a Windows-built
+# bundle doesn't record.
 for app in worker-publish/Worker.MT-CalSync selfhost-publish/SelfHost.MT-CalSync \
            worker-publish.old/Worker.MT-CalSync selfhost-publish.old/SelfHost.MT-CalSync; do
-    [[ -f "$APP_HOME/$app" ]] && chmod 0750 "$APP_HOME/$app"
+    if [[ -f "$APP_HOME/$app" ]]; then chmod 0750 "$APP_HOME/$app"; fi
 done
 chown -R root:root "$APP_HOME/deploy" "$APP_HOME/scripts"
 find "$APP_HOME/deploy" "$APP_HOME/scripts" -type d -exec chmod 0755 {} +
 find "$APP_HOME/deploy" "$APP_HOME/scripts" -type f -exec chmod 0644 {} +
 
-# The units come from the bundle on every deploy, so an existing install picks up a changed
-# unit (such as a new ExecStart) instead of keeping the one it was provisioned with.
+# Install the units on every deploy so an existing install picks up changes (such as a
+# new ExecStart).
 for unit in mtcalsync-worker@.service mtcalsync-sync.timer mtcalsync-selfhost.service; do
-    [[ -f "$APP_HOME/deploy/$unit" ]] && install -m0644 "$APP_HOME/deploy/$unit" /etc/systemd/system/
+    if [[ -f "$APP_HOME/deploy/$unit" ]]; then install -m0644 "$APP_HOME/deploy/$unit" /etc/systemd/system/; fi
 done
 systemctl daemon-reload
 
 systemctl start mtcalsync-selfhost.service
-[[ $timer_was_active -eq 1 ]] && systemctl start mtcalsync-sync.timer
+if [[ $timer_was_active -eq 1 ]]; then systemctl start mtcalsync-sync.timer; fi
 echo "Deployed. worker + self-host portal swapped; previous kept as *.old."

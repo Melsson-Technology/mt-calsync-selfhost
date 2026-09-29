@@ -1,26 +1,21 @@
 # Closes pull requests opened against the GitHub mirror, with an explanation.
 #
-# Two separate reasons a PR cannot be accepted here, and the comment below states both:
+# A PR cannot be accepted here for two reasons, both stated in the comment below:
 #
-#   1. This repository is a one-way mirror. Anything merged on GitHub is destroyed by the next sync
-#      from upstream, so a merge would silently lose the contributor's work rather than ship it.
-#   2. Contributions are closed until a licence-grant CLA exists - see CONTRIBUTING.md. MT-CalSync is
-#      AGPL-3.0 and Melsson also offers a hosted version, which only works while Melsson can relicense
-#      the codebase. That cannot be arranged retroactively.
+#   1. This repository is a one-way mirror; the next sync from upstream overwrites anything merged here.
+#   2. Contributions are closed until a licence-grant CLA exists (see CONTRIBUTING.md), and relicensing
+#      rights cannot be granted retroactively.
 #
-# Leaving PRs open would imply they are under consideration. Closing them immediately, with the reason,
-# is the honest answer - and it is the one thing that stops someone spending an evening on a patch that
-# was never going to be merged.
+# Closing at once, with the reason, avoids implying a PR is under consideration.
 #
-# No third-party actions are used. `gh` is preinstalled on GitHub-hosted runners, so there is nothing
-# to pin to a commit SHA and no supply-chain surface.
+# No third-party actions: `gh` is preinstalled on GitHub-hosted runners, so there is nothing to pin.
 
 name: Pull requests are not open yet
 
 on:
-  # pull_request_target, not pull_request: a PR from a fork gets a read-only token under
-  # `pull_request`, so it could not comment or close. The usual danger of pull_request_target is
-  # checking out untrusted code while holding a writable token - this job never checks out anything.
+  # pull_request_target, not pull_request: a fork's PR gets a read-only token under `pull_request`
+  # and could not be commented on or closed. This job never checks out the PR's code, which is
+  # what makes pull_request_target safe here.
   pull_request_target:
     types: [opened, reopened]
 
@@ -50,7 +45,7 @@ jobs:
           the next sync from upstream - your work would disappear rather than ship.
 
           Please open an issue instead. Bug reports, "this failed against my tenant", and documentation
-          corrections are genuinely the most useful thing right now, and they need no paperwork. If you
+          corrections are the most useful thing right now, and they need no paperwork. If you
           would like to make this change yourself once contributions open, say so in the issue and we
           will come back to you.
 

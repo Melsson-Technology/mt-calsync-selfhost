@@ -20,7 +20,7 @@
                background:var(--bg); color:var(--body); font-size:14px; line-height:1.55;
                -webkit-font-smoothing:antialiased; }
 
-        /* ── top bar ─────────────────────────────────────────────────────── */
+        /* top bar */
         .nav { background:linear-gradient(180deg,#111c33,#0f172a); color:#fff; padding:0 22px;
                display:flex; align-items:center; gap:4px; height:56px;
                box-shadow:0 1px 0 rgba(255,255,255,.06) inset, 0 1px 3px rgba(15,23,42,.25); }
@@ -55,7 +55,7 @@
             .nav a.active::after { left:9px; right:9px; }
         }
 
-        /* ── page scaffold ───────────────────────────────────────────────── */
+        /* page scaffold */
         .container { max-width:980px; margin:30px auto 60px; padding:0 22px; }
         h1 { font-size:22px; font-weight:650; letter-spacing:-.2px; color:var(--ink); margin:0 0 4px; }
         h2 { font-size:15px; font-weight:650; color:var(--ink); margin:0 0 12px; }
@@ -65,7 +65,7 @@
         code { background:var(--off-bg); border:1px solid var(--line-soft); padding:1px 6px;
                border-radius:5px; font-size:12px; color:var(--ink); }
 
-        /* ── cards ───────────────────────────────────────────────────────── */
+        /* cards */
         /* overflow-x: a wide table (System's pairs grid has ten columns) scrolls inside its
            card on a narrow screen instead of widening the whole page. */
         .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
@@ -74,7 +74,7 @@
         .card.warn { border-color:var(--warn-line); background:var(--warn-bg); }
         .card.danger { border-color:var(--danger-line); }
 
-        /* ── forms ───────────────────────────────────────────────────────── */
+        /* forms */
         .field { margin-bottom:14px; min-width:0; }
         .field label { display:block; font-size:12px; color:var(--muted); margin-bottom:5px; font-weight:600; }
         input[type=text], input[type=password], input[type=number], input[type=email], select, textarea {
@@ -88,7 +88,7 @@
         .check { display:flex; align-items:center; gap:8px; color:var(--body); font-weight:500; }
         .check input { width:auto; accent-color:var(--accent); }
 
-        /* ── buttons ─────────────────────────────────────────────────────── */
+        /* buttons */
         .btn { display:inline-block; border:1px solid var(--line); background:#fff; color:var(--ink);
                padding:8px 15px; border-radius:8px; font:inherit; font-weight:600; cursor:pointer;
                text-decoration:none; transition:background .12s, border-color .12s, box-shadow .12s; }
@@ -98,7 +98,7 @@
         .btn-primary:hover { background:var(--accent-hover); border-color:var(--accent-hover); }
         .btn-sm { padding:4px 11px; font-size:12.5px; border-radius:7px; }
 
-        /* ── badges ──────────────────────────────────────────────────────── */
+        /* badges */
         .badge { display:inline-block; padding:2px 9px; border-radius:999px; font-size:11px;
                  font-weight:650; letter-spacing:.02em; border:1px solid var(--off-line);
                  background:var(--off-bg); color:var(--off); vertical-align:middle; white-space:nowrap; }
@@ -106,7 +106,7 @@
         .badge.warn { background:var(--warn-bg); color:var(--warn); border-color:var(--warn-line); }
         .badge.off { background:var(--off-bg); color:var(--off); border-color:var(--off-line); }
 
-        /* ── tables ──────────────────────────────────────────────────────── */
+        /* tables */
         table { width:100%; border-collapse:collapse; }
         th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line-soft); }
         th { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; font-weight:650; }
@@ -114,7 +114,7 @@
         tr:last-child td { border-bottom:none; }
         td form { display:inline; }
 
-        /* ── alerts / report ─────────────────────────────────────────────── */
+        /* alerts / report */
         .alert { padding:10px 14px; border-radius:9px; margin-bottom:16px; font-size:13px;
                  font-weight:500; border:1px solid transparent; }
         .alert-success { background:var(--ok-bg); color:var(--ok); border-color:var(--ok-line); }
@@ -122,7 +122,7 @@
         pre.report { background:#0b1020; color:#d1d5db; padding:14px 16px; border-radius:10px;
                      overflow:auto; font-size:12px; line-height:1.5; }
 
-        /* ── setup guide / steps ─────────────────────────────────────────── */
+        /* setup guide / steps */
         .card.ok { border-color:var(--ok-line); background:var(--ok-bg); }
         .steps { list-style:none; margin:14px 0 0; padding:0; }
         .step { display:flex; gap:13px; align-items:flex-start;

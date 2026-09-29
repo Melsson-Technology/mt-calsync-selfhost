@@ -1,15 +1,10 @@
 namespace Core.MTCalSync
 {
-	// The ONLY component that differs by fidelity mode. Turns one source RemoteEvent
-	// (an expanded occurrence or a single event) into 1..N ProjectedUnits — the
-	// payload written to the mirror side. Engine/mapping/stamping/locking are
-	// identical across modes.
-	//
-	// Instance mode: providers return expanded occurrences, so Project
-	// returns exactly one unit per source event. Recurring instances carry a stable
-	// (originSeriesKey, occurrenceOriginalStartUtc) so series-shrink can delete
-	// mirrors whose source occurrence was cancelled/moved out of window. Series
-	// mode passes recurring masters, with their RRULE, through the same interface.
+	// The only component that differs by fidelity mode. Turns one source event into the
+	// units written to the mirror side; mapping, stamping and locking are the same in
+	// every mode. Instance mode yields one unit per expanded occurrence, keyed by
+	// (originSeriesKey, occurrenceOriginalStartUtc). Series mode yields a master with its
+	// RRULE through the same interface.
 	public interface IEventProjection
 	{
 		string Kind { get; }
@@ -23,7 +18,7 @@ namespace Core.MTCalSync
 			: new FullDetailProjection();
 	}
 
-	// Shared base: identity/recurrence linkage is fidelity-independent.
+	// Identity and recurrence linkage don't depend on fidelity.
 	public abstract class ProjectionBase : IEventProjection
 	{
 		public abstract string Kind { get; }
@@ -48,15 +43,12 @@ namespace Core.MTCalSync
 				OriginSeriesKey = seriesKey,
 				OccurrenceOriginalStartUtc = src.OccurrenceOriginalStartUtc
 			};
-			u.UnitKey = isOcc && src.OccurrenceOriginalStartUtc.HasValue
-				? $"{seriesKey}|{src.OccurrenceOriginalStartUtc.Value:O}"
-				: src.Id;
 			return u;
 		}
 	}
 
-	// Full detail: copy title/location/notes/times. NEVER copies attendees as guests
-	// (optionally appends their names to the body). This is the user's default mode.
+	// The default mode: copies title, location, notes and times. Attendees are never copied
+	// as guests, though their names can be appended to the body.
 	public sealed class FullDetailProjection : ProjectionBase
 	{
 		public override string Kind => Fidelity.FullDetail;
@@ -64,14 +56,12 @@ namespace Core.MTCalSync
 		public override IReadOnlyList<ProjectedUnit> Project(RemoteEvent src, SyncPair pair, RollingWindow window)
 		{
 			var u = NewUnit(src);
-			// Series mode: a recurring master becomes a single series_master unit carrying
-			// the RRULE (mirrored as one recurring event, not N occurrences).
+			// In series mode a recurring master becomes one series_master unit with its RRULE.
 			if (pair.SeriesMode && src.IsSeriesMaster)
 			{
 				u.UnitKind = UnitKinds.SeriesMaster;
 				u.OriginSeriesKey = src.Id;
 				u.OccurrenceOriginalStartUtc = null;
-				u.UnitKey = src.Id;
 				u.RecurrenceRule = src.RecurrenceRule;
 			}
 			u.Subject = string.IsNullOrWhiteSpace(src.Subject) ? "(no title)" : src.Subject;
@@ -87,7 +77,7 @@ namespace Core.MTCalSync
 		}
 	}
 
-	// Busy-block: opaque 'Busy' (or copied title), no details. Available per pair.
+	// Busy block: "Busy" (or the title, if the pair copies it) and no other details.
 	public sealed class BusyBlockProjection : ProjectionBase
 	{
 		public override string Kind => Fidelity.BusyBlock;

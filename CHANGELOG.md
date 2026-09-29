@@ -8,6 +8,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Thi
 pre-1.0: releases are tagged from 0.1.0 on, and breaking changes are called out in
 their entry.
 
+## [0.1.1] - 2026-09-29 - cleanup
+
+### Fixed
+
+- `remove-pair` no longer forgets a mirror it failed to delete. The pair was kept for a
+  retry, but the mirror's link was dropped, so the retry never saw it and the copy was left
+  behind on the calendar.
+- Dates sent to Microsoft Graph and MySQL are formatted with the invariant culture. On a
+  server whose locale uses another time separator or calendar, a date could be written
+  wrongly.
+- `purge-mirror` and `repair-chains` check the origin's iCalUID from the mapping as well as
+  from the stamp, as the sync does.
+
+### Changed
+
+- Comments throughout are shorter and describe the code as it is. Unused code is removed.
+- The systemd units no longer order themselves after `mariadb.service`: MariaDB isn't
+  supported.
+
 ## [0.1.0] - 2026-09-29 - the first versioned release
 
 ### Changed

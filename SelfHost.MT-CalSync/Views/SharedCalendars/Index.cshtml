@@ -4,8 +4,7 @@
 }
 
 <h1>Shared calendars</h1>
-@* The personalised sentence only when both addresses are known: with nothing set up
-   it rendered as "visible to ." and "primary calendar ()". *@
+@* The personalised sentence needs both addresses; without them it reads as broken. *@
 @if (!string.IsNullOrEmpty(Model.GoogleEmail) && !string.IsNullOrEmpty(Model.M365Email))
 {
     <p class="muted" style="margin-bottom:16px">

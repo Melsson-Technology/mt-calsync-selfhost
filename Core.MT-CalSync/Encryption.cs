@@ -3,18 +3,12 @@ using System.Text;
 
 namespace Core.MTCalSync
 {
-	// Symmetric encryption for secrets at rest (settings table, OAuth tokens).
-	//
-	// v2 (current): AES-256-GCM with a per-deployment key from settings.xml
-	// (`DataEncryptionKey`, base64 of 32 random bytes — provision generates it with
-	// `openssl rand -base64 32`). Every record gets a fresh random 96-bit nonce, so
-	// identical plaintexts produce different ciphertexts, and GCM authenticates the
-	// ciphertext (tampering fails the decrypt instead of yielding garbage).
+	// Encryption for secrets at rest (settings table, OAuth tokens): AES-256-GCM with the
+	// deployment's DataEncryptionKey from settings.xml (base64 of 32 random bytes). Each
+	// value gets a fresh 96-bit nonce, and GCM makes tampering fail the decrypt.
 	// Format: "v2:" + Base64(nonce[12] || tag[16] || ciphertext).
-	//
-	// Pre-v2 ciphertext (the original CBC/static-IV scheme) is no longer supported:
-	// Decrypt() rejects any value lacking the "v2:" prefix. A deployment that predates
-	// v2 must have run `migrate-secrets` before upgrading past this point.
+	// Values without the "v2:" prefix are pre-v2 ciphertext; Decrypt() rejects them and
+	// the secret must be re-entered.
 	public class Encryption
 	{
 		private const string V2Prefix = "v2:";
@@ -65,8 +59,7 @@ namespace Core.MTCalSync
 			return Encoding.UTF8.GetString(plain);
 		}
 
-		// True when the stored value predates v2 (no "v2:" prefix) — it can no longer be
-		// decrypted and must be re-entered under the current DataEncryptionKey.
+		// True for a pre-v2 value, which can't be decrypted and must be re-entered.
 		public static bool IsLegacy(string encryptedText) =>
 			!string.IsNullOrEmpty(encryptedText) && !encryptedText.StartsWith(V2Prefix, StringComparison.Ordinal);
 

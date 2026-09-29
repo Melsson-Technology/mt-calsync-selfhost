@@ -3,9 +3,8 @@ using System.Net.Mail;
 
 namespace Core.MTCalSync
 {
-	// Minimal SMTP sender for alerts + transactional mail. Uses System.Net.Mail
-	// with the SMTP config from settings — no third-party email dependency.
-	// Never throws: a broken mailer must not fail a sync run.
+	// SMTP sender for alerts, using System.Net.Mail and the SMTP settings. It never
+	// throws, because a broken mailer must not fail a sync run.
 	public class Email : @base
 	{
 		public string sendTo { get; set; } = string.Empty;
@@ -51,14 +50,14 @@ namespace Core.MTCalSync
 			}
 		}
 
-		// Convenience: fire a one-off operator alert (goes to Settings.AlertTo).
+		// Sends an operator alert to Settings.AlertTo.
 		public static bool SendAlert(string subject, string body)
 		{
 			var e = new Email { subject = subject, bodyText = body };
 			return e.sendEmail();
 		}
 
-		// User-facing notification to a specific address.
+		// Sends a notification to a specific address.
 		public static bool SendUserAlert(string toEmail, string subject, string body)
 		{
 			var e = new Email { sendTo = toEmail, subject = subject, bodyText = body };

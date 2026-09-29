@@ -1,6 +1,6 @@
 namespace Core.MTCalSync
 {
-	// Per-run audit row + live counters the engine increments during a run.
+	// One row per run, with the counters the engine increments as it goes.
 	public class SyncRun : @base
 	{
 		public long runID { get; set; }
@@ -31,8 +31,8 @@ namespace Core.MTCalSync
 			status = finalStatus;
 			if (runID <= 0) return;
 			var oDA = new DataAccess();
-			// syncType too: a run is inserted as incremental before it knows whether it will list
-			// a calendar in full, and the label used to stay that way whatever happened.
+			// syncType is written here too: a run starts as incremental before it knows whether
+			// it will list a calendar in full.
 			string sql =
 				"update sync_run set finishedAt=NOW(), status=@status, syncType=@st, leftChanges=@lc, rightChanges=@rc, createdCount=@cc, " +
 				"updatedCount=@uc, deletedCount=@dc, skippedCount=@sc, echoSkippedCount=@ec, conflictCount=@cf, adoptedCount=@ad, " +

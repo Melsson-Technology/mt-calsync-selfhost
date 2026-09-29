@@ -2,7 +2,7 @@ using Core.MTCalSync;
 
 namespace SelfHost.MTCalSync.Models
 {
-	// Data for the self-serve pair-creation wizard: the user's connected accounts
+	// Data for the pair-creation wizard: the user's connected accounts
 	// with their live calendar lists, or the reason the wizard is unavailable.
 	public class PairWizardModel
 	{

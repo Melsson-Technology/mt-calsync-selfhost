@@ -2,9 +2,8 @@ using System.Data;
 
 namespace Core.MTCalSync
 {
-	// The crux cross-reference. One row links a left (M365) event to a right
-	// (Google) event; originProvider says which side is authoritative for this unit.
-	// Long provider ids are indexed via their SHA-256 (*EventKey) — see schema.
+	// One row links a left (M365) event to a right (Google) event; originProvider is the
+	// authoritative side. Long provider ids are indexed by their SHA-256 (*EventKey).
 	public class EventMapping : @base
 	{
 		public long mappingID { get; set; }
@@ -36,16 +35,16 @@ namespace Core.MTCalSync
 		public string lastSyncDirection { get; set; } = string.Empty;
 		public DateTime? tombstonedAt { get; set; }
 
-		// ── side accessors ───────────────────────────────────────────────────
+		// Side accessors
 		public string EventIdForSide(string side) => side == Providers.M365 ? leftEventId : rightEventId;
 		public string EtagForSide(string side) => side == Providers.M365 ? leftEtag : rightEtag;
 		public string ICalUidForSide(string side) => side == Providers.M365 ? leftICalUid : rightICalUid;
 		public string MirrorSide => Providers.Other(originProvider);
 		public string MirrorEventId => EventIdForSide(MirrorSide);
 
-		// Any LIVE mapping (any pair) already tracking this provider event on the
-		// given side? The stray sweep uses this so adopted mirrors — which keep
-		// their old pair's stamp until the next rewrite — are never deleted.
+		// True when an active mapping in any pair tracks this event on the given side. The
+		// stray sweep checks it because adopted mirrors keep their old pair's stamp until
+		// the next rewrite, and must not be deleted.
 		public bool existsActiveForSide(string side, string eventId)
 		{
 			if (string.IsNullOrEmpty(eventId)) return false;
@@ -74,8 +73,8 @@ namespace Core.MTCalSync
 			}
 		}
 
-		// ── finders ──────────────────────────────────────────────────────────
-		// Any active/tombstoned mapping whose <side> event id hashes to eventKey.
+		// Finders
+		// Any mapping, active or tombstoned, whose event id on `side` hashes to eventKey.
 		public EventMapping? findBySideKey(long pair, string side, string eventKey)
 		{
 			if (string.IsNullOrEmpty(eventKey)) return null;
@@ -91,14 +90,10 @@ namespace Core.MTCalSync
 			return null;
 		}
 
-		public EventMapping? findByOriginId(long pair, string originProv, string originId) =>
-			findBySideKey(pair, originProv, string.IsNullOrEmpty(originId) ? string.Empty : Common.Sha256Hex(originId));
-
-		// Active mapping for this pair where `originSide` is the authoritative side and the
-		// stored origin iCalUId matches. The origin iCalUId is STABLE across provider id-churn
-		// (Exchange reissues an event's id on some edits/accepts), so this recovers a mapping
-		// the side-key lookup lost — the alternative being a spurious Create (duplicate mirror).
-		// Index-served by idx_map_left_ical / idx_map_right_ical (pairID, {left|right}ICalUid).
+		// Active mapping whose origin is `originSide` with this iCalUId. Exchange reissues an
+		// event's id on some edits and accepts, but the iCalUId stays put, so this recovers a
+		// mapping the id lookup missed instead of creating a duplicate mirror.
+		// Served by idx_map_left_ical / idx_map_right_ical.
 		public EventMapping? findActiveByOriginUid(long pair, string originSide, string iCalUid)
 		{
 			if (string.IsNullOrEmpty(iCalUid)) return null;
@@ -116,11 +111,9 @@ namespace Core.MTCalSync
 			return null;
 		}
 
-		// True when a DIFFERENT pair holds an ACTIVE mapping in which `eventKey` is that
-		// pair's MIRROR on `side` (its originProvider is the OTHER side). This is how we
-		// recognise an event that another pair wrote into a SHARED destination calendar,
-		// so a pair polling that calendar never re-mirrors a sibling pair's mirror.
-		// Requires idx_map_left_key / idx_map_right_key (in 001_schema.sql) to be index-served.
+		// True when another pair has an active mapping in which `eventKey` is its mirror on
+		// `side`. Pairs sharing a destination calendar use this to avoid re-mirroring each
+		// other's mirrors. Served by idx_map_left_key / idx_map_right_key.
 		public bool isMirrorInAnotherPair(long thisPairId, string side, string eventKey)
 		{
 			if (string.IsNullOrEmpty(eventKey)) return false;
@@ -136,7 +129,7 @@ namespace Core.MTCalSync
 			catch (Exception ex) { Common.writeToLog("ERROR EventMapping.isMirrorInAnotherPair:", ex); return false; }
 		}
 
-		// Active occurrence mapping keyed by its stable (series, originalStart).
+		// Active occurrence mapping, keyed by its stable (series, original start).
 		public EventMapping? findByOccurrence(long pair, string originProv, string seriesKey, DateTime? occStartUtc)
 		{
 			if (string.IsNullOrEmpty(seriesKey) || occStartUtc == null) return null;
@@ -155,24 +148,6 @@ namespace Core.MTCalSync
 			}
 			catch (Exception ex) { Common.writeToLog("ERROR EventMapping.findByOccurrence:", ex); }
 			return null;
-		}
-
-		// Active occurrence/single mappings for a series (series-shrink diffing).
-		public List<EventMapping> listActiveForSeries(long pair, string originProv, string seriesKey)
-		{
-			var list = new List<EventMapping>();
-			if (string.IsNullOrEmpty(seriesKey)) return list;
-			var oDA = new DataAccess();
-			var p = new Dictionary<string, object> { { "@p", pair }, { "@op", originProv }, { "@sk", seriesKey } };
-			try
-			{
-				var ds = oDA.execQuery(
-					"select * from event_mapping where pairID=@p and originProvider=@op and originSeriesKey=@sk and status='active'",
-					"DATA", "DATA", p);
-				foreach (DataRow r in ds.Tables[0].Rows) list.Add(dataRowToObject(r));
-			}
-			catch (Exception ex) { Common.writeToLog("ERROR EventMapping.listActiveForSeries:", ex); }
-			return list;
 		}
 
 		public List<EventMapping> listByPair(long pair, bool includeTombstoned = false)
@@ -198,8 +173,8 @@ namespace Core.MTCalSync
 			return Common.ToInt(v);
 		}
 
-		// ── writes ─────────────────────────────────────────────────────────
-		// Insert (mappingID==0) or update by id. EventKeys are (re)derived here.
+		// Writes
+		// Inserts when mappingID is 0, else updates. The EventKeys are derived here.
 		public long save()
 		{
 			leftEventKey = string.IsNullOrEmpty(leftEventId) ? string.Empty : Common.Sha256Hex(leftEventId);
@@ -260,8 +235,8 @@ namespace Core.MTCalSync
 			status = "tombstoned";
 		}
 
-		// After recognizing a benign echo, refresh the mirror side's stored etag so
-		// the next poll short-circuits on etag equality.
+		// After a benign echo, stores the mirror's new etag so the next update or delete of
+		// it sends the current one.
 		public void refreshMirrorEtag(string mirrorSide, string etag)
 		{
 			if (mappingID <= 0) return;

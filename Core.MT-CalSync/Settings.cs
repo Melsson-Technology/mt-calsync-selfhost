@@ -4,10 +4,9 @@ using System.Xml;
 
 namespace Core.MTCalSync
 {
-	// Configuration + the DB-backed `settings` entity. Non-secret config is read
-	// from settings.xml (process-cached). Secrets resolve DB-first (encrypted in
-	// the settings table) with an XML plaintext fallback, so a `set-secret` CLI
-	// edit takes effect without a redeploy.
+	// Configuration, plus the `settings` table entity. settings.xml is read once per
+	// process. Most values resolve from the settings table first (secrets encrypted), then
+	// settings.xml, so a portal or `set-secret` change applies without a restart.
 	public class Settings : @base
 	{
 		private static readonly Lazy<Dictionary<string, string>> _cachedSettings = new(() => LoadAllSettings());
@@ -37,19 +36,16 @@ namespace Core.MTCalSync
 		private static string GetCachedSetting(string key) =>
 			_cachedSettings.Value.TryGetValue(key, out var value) ? value : string.Empty;
 
-		// ─── Database (settings.xml ONLY — bootstrap; the Portal needs it to reach
-		//     the DB where every other setting lives) ────────────────────────
+		// Database: settings.xml only, since it is needed to reach the settings table.
 		public static string MySqlDatabaseConnection => GetCachedSetting("MySqlDatabaseConnection");
 
-		// ─── Crypto bootstrap (settings.xml ONLY — encrypts the DB values, so it
-		//     can never live in the DB itself) ───────────────────────────────
-		// Base64 of 32 random bytes; provision generates it (`openssl rand -base64 32`).
+		// Encryption key: settings.xml only, since it encrypts the table's secrets.
+		// Base64 of 32 random bytes (`openssl rand -base64 32`).
 		public static string DataEncryptionKey => GetCachedSetting("DataEncryptionKey");
 
-		// Where ASP.NET DataProtection persists its key ring (cookie + state crypto).
-		// Must survive deploys — the publish dir is swapped atomically, so default to
-		// /etc/mtcalsync/dpkeys when that config root exists (server), else a stable
-		// local folder for dev.
+		// Where ASP.NET DataProtection keeps its key ring. It must outlive the publish
+		// directory, which is replaced on upgrade, so on a server it defaults to
+		// /etc/mtcalsync/dpkeys, and elsewhere to a local folder.
 		public static string DataProtectionKeysPath
 		{
 			get
@@ -62,35 +58,30 @@ namespace Core.MTCalSync
 			}
 		}
 
-		// ─── Portal operator login ──────────────────────────────────────────
-		// The PBKDF2 hash of the portal operator's password, set with the
-		// `set-admin-password` worker command.
+		// Portal operator login: the PBKDF2 hash set by `set-admin-password`.
 		public static string SelfHostAdminPasswordHash => resolveRaw("SelfHostAdminPasswordHash");
 
-		// Web-editable config below resolves DB-first (the Portal writes it there) with
-		// an XML fallback, so the admin UI is the source of truth without redeploying.
+		// Everything below is editable in the portal, which writes it to the settings table.
 
-		// ─── Microsoft Graph ────────────────────────────────────────────────
+		// Microsoft Graph
 		public static string GraphTenantId => resolveRaw("GraphTenantId");
 		public static string GraphClientId => resolveRaw("GraphClientId");
 		public static string EffectiveGraphClientSecret => resolveKey("GraphClientSecret", GetCachedSetting("GraphClientSecret"));
 
-		// ─── Delegated OAuth app clients ────────────────────────────────────
-		// The multitenant Entra app + Google OAuth web client that users consent to.
-		// Distinct from the app-only Graph registration / service account above,
-		// which stay dedicated to operator (app_default) connections.
+		// Delegated OAuth clients
+		// The multitenant Entra app and Google OAuth web client that users consent to.
+		// The app-only Graph registration and service account serve app_default connections.
 		public static string MsOAuthClientId => resolveRaw("MsOAuthClientId");
 		public static string EffectiveMsOAuthClientSecret => resolveKey("MsOAuthClientSecret", GetCachedSetting("MsOAuthClientSecret"));
 		public static string GoogleOAuthClientId => resolveRaw("GoogleOAuthClientId");
 		public static string EffectiveGoogleOAuthClientSecret => resolveKey("GoogleOAuthClientSecret", GetCachedSetting("GoogleOAuthClientSecret"));
-		// Show the "you may see an unverified-app screen" note on the connect page.
-		// On until the provider verifications clear (also accurate for self-hosters
-		// running their own unverified OAuth clients).
+		// Shows the "you may see an unverified-app screen" note on the connect page. On by
+		// default, since OAuth clients are usually unverified.
 		public static bool UnverifiedAppNotice => parseBool(resolveRaw("UnverifiedAppNotice"), true);
 
-		// ─── Google ─────────────────────────────────────────────────────────
-		// A path to the SA JSON key file (chmod 0600) OR inline JSON stored encrypted
-		// in the DB (paste it in the Portal). Path wins when set.
+		// Google
+		// The service account key: a path to the JSON file (chmod 0600), or the JSON stored
+		// encrypted in the settings table. The path wins when set.
 		public static string GoogleServiceAccountJsonPath => resolveRaw("GoogleServiceAccountJsonPath");
 		public static string EffectiveGoogleServiceAccountJson
 		{
@@ -106,7 +97,7 @@ namespace Core.MTCalSync
 			}
 		}
 
-		// ─── Sync defaults ──────────────────────────────────────────────────
+		// Sync defaults
 		public static int WindowDays => (int)parseDecimal(resolveRaw("WindowDays"), 60m);
 		public static int LookbackDays => (int)parseDecimal(resolveRaw("LookbackDays"), 1m);
 		public static string FidelityMode => withDefault(resolveRaw("FidelityMode"), "full_detail");
@@ -115,25 +106,25 @@ namespace Core.MTCalSync
 		public static int FullResyncHour => (int)parseDecimal(resolveRaw("FullResyncHour"), 3m);
 		public static int MaxDeltaPages => (int)parseDecimal(resolveRaw("MaxDeltaPages"), 50m);
 
-		// ─── Worker ─────────────────────────────────────────────────────────
-		// Concurrent pair runs per worker tick, sized to the box.
+		// Worker
+		// Pairs run at once per worker tick; size it to the machine.
 		public static int WorkerMaxConcurrency => (int)parseDecimal(resolveRaw("WorkerMaxConcurrency"), 2m);
 
-		// Absolute origin for links in outbound email (reset links etc.), no trailing slash.
+		// The portal's public origin, no trailing slash, used for OAuth redirect URIs.
+		// Empty means the request's own host.
 		public static string PublicBaseUrl => resolveRaw("PublicBaseUrl").TrimEnd('/');
 
-		// Fixed GUID for the Graph singleValueExtendedProperties namespace + Google
-		// private extended-property prefix. Keep this STABLE across deploys — changing
-		// it orphans every existing provenance stamp.
+		// Namespace GUID for the Graph extended properties and the Google private-property
+		// prefix. Never change it: every existing provenance stamp would be orphaned.
 		public static string ExtPropNamespaceGuid =>
 			withDefault(GetCachedSetting("ExtPropNamespaceGuid"), "b7c9e3a2-6d41-4f8b-9c2e-a1b2c3d4e5f6");
 		public static string AppInstanceId => withDefault(GetCachedSetting("AppInstanceId"), "mt-calsync");
 
-		// ─── Branding ───────────────────────────────────────────────────────
-		// The product name in alert emails; overridable in the settings table.
+		// Branding
+		// The product name in alert emails.
 		public static string AppName => withDefault(resolveRaw("AppName"), "MT-CalSync");
 
-		// ─── SMTP ───────────────────────────────────────────────────────────
+		// SMTP
 		public static string SmtpHost => resolveRaw("SmtpHost");
 		public static int SmtpPort => (int)parseDecimal(resolveRaw("SmtpPort"), 587m);
 		public static bool SmtpUseSsl => parseBool(resolveRaw("SmtpUseSsl"), true);
@@ -142,7 +133,7 @@ namespace Core.MTCalSync
 		public static string SmtpFrom => resolveRaw("SmtpFrom");
 		public static string AlertTo => resolveRaw("AlertTo");
 
-		// ─── helpers ────────────────────────────────────────────────────────
+		// Helpers
 		private static string withDefault(string val, string def) => string.IsNullOrWhiteSpace(val) ? def : val;
 
 		private static decimal parseDecimal(string val, decimal fallback) =>
@@ -155,7 +146,7 @@ namespace Core.MTCalSync
 				|| val.Equals("yes", StringComparison.OrdinalIgnoreCase);
 		}
 
-		// Live single-value read from the DB settings table (bypasses the XML cache).
+		// Reads one value from the settings table on every call; nothing is cached.
 		private static string getDbSetting(string name)
 		{
 			try
@@ -178,15 +169,15 @@ namespace Core.MTCalSync
 		public static string Resolve(string name) => resolveRaw(name);
 		public static string ResolveSecret(string name) => resolveKey(name, GetCachedSetting(name));
 
-		// DB (plaintext) → XML fallback, for non-secret web-editable config. The Portal
-		// writes these into the settings table, so a UI edit takes effect immediately.
+		// Plain value: the settings table, then settings.xml.
 		private static string resolveRaw(string name)
 		{
 			string db = getDbSetting(name);
 			return string.IsNullOrWhiteSpace(db) ? GetCachedSetting(name) : db;
 		}
 
-		// DB (encrypted) → XML fallback. A decrypt failure falls back to the file value.
+		// Secret: the encrypted table value, then settings.xml. A value that won't decrypt
+		// is logged and the file value used.
 		private static string resolveKey(string dbName, string xmlFallback)
 		{
 			string enc = getDbSetting(dbName);
@@ -198,7 +189,7 @@ namespace Core.MTCalSync
 			return xmlFallback;
 		}
 
-		// ─── DB-backed settings entity ──────────────────────────────────────
+		// The settings table entity
 		public long settingID { get; set; }
 		public string settingName { get; set; } = string.Empty;
 		public string settingValue { get; set; } = string.Empty;
@@ -224,7 +215,7 @@ namespace Core.MTCalSync
 			return oSet;
 		}
 
-		// Upsert by name (settingName is UNIQUE).
+		// Upsert by name; settingName is unique.
 		public long saveByName(string name, string value)
 		{
 			long rtn = 0;

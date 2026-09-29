@@ -4,14 +4,12 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 
 namespace SelfHost.MTCalSync
 {
-	// Single-tenant auth for the self-host portal. There is exactly one operator, who
-	// owns everything, so tenant lookups collapse to constants — customer 1 / user 1,
-	// always admin (the same identifiers the engine CLI stamps on operator rows). Its
-	// names and signatures match a multi-user portal's PortalAuth, so controllers
-	// shared with one need no change at their call sites.
+	// Auth for the portal's single operator, who owns everything, so identity lookups are
+	// constants: customer 1, user 1, always admin (the ids the engine CLI stamps on operator
+	// rows). The signatures suit a multi-user host, so controllers can be shared unchanged.
 	public static class PortalAuth
 	{
-		// The built-in self-host tenant/operator (see the engine's seeded customer 1).
+		// The engine's seeded customer 1 and its operator.
 		public const long SelfHostCustomerId = 1;
 		public const long SelfHostUserId = 1;
 

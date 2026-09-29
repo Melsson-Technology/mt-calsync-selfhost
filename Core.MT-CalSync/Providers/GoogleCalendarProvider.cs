@@ -9,15 +9,13 @@ using System.Text.Json;
 
 namespace Core.MTCalSync
 {
-	// Google side: events.list with syncToken (whole/window-bounded, instance-
-	// expanded), writes with sendUpdates=none and extendedProperties.private
-	// (provenance). NEVER adds guests.
+	// Google provider. Reads events.list with a syncToken; writes send sendUpdates=none
+	// and carry the provenance stamp in extendedProperties.private. Never adds guests.
 	//
-	// Two credential shapes: service account + domain-wide delegation (operator
-	// connections, impersonating a Workspace user) or a delegated per-user
-	// UserCredential built from the owner's stored OAuth refresh token. On the
-	// delegated path an invalid_grant refresh failure marks the grant needs_reauth
-	// and surfaces NeedsReauthException (user problem, not a sync fault).
+	// Credentials are either a service account with domain-wide delegation
+	// (impersonating a Workspace user) or a per-user OAuth UserCredential. On the
+	// OAuth path an invalid_grant refresh marks the account needs_reauth and raises
+	// NeedsReauthException rather than a sync fault.
 	public class GoogleCalendarProvider : ICalendarProvider
 	{
 		private readonly CalendarService _svc;
@@ -30,9 +28,8 @@ namespace Core.MTCalSync
 		public GoogleCalendarProvider(string serviceAccountJson, string impersonateEmail, string calendarId, bool seriesMode = false)
 		{
 			_seriesMode = seriesMode;
-			// Build a ServiceAccountCredential straight from the key JSON and impersonate
-			// the target user (domain-wide delegation) via the Initializer.User property —
-			// the canonical, non-deprecated DWD pattern.
+			// Domain-wide delegation: impersonate the user via Initializer.User, the
+			// non-deprecated pattern.
 			using var doc = JsonDocument.Parse(serviceAccountJson);
 			var root = doc.RootElement;
 			string clientEmail = root.TryGetProperty("client_email", out var ce) ? (ce.GetString() ?? "") : "";
@@ -67,9 +64,7 @@ namespace Core.MTCalSync
 			_calId = string.IsNullOrWhiteSpace(calendarId) ? "primary" : calendarId;
 		}
 
-		// ── calendar discovery ──────────────────────────────────────────────
-		// The impersonated user's calendar list (primary + calendars owned/shared/
-		// subscribed). Reader access or better; the existing Scope.Calendar covers it.
+		// Calendar discovery: the user's calendar list with reader access or better.
 		public async Task<IReadOnlyList<RemoteCalendar>> ListCalendarsAsync()
 		{
 			var list = new List<RemoteCalendar>();
@@ -103,7 +98,7 @@ namespace Core.MTCalSync
 			return list;
 		}
 
-		// ── incremental pull ────────────────────────────────────────────────
+		// Incremental pull
 		public async Task<ChangeSet> GetChangesAsync(RollingWindow window, SyncState state, bool forceFull)
 		{
 			var cs = new ChangeSet();
@@ -117,14 +112,14 @@ namespace Core.MTCalSync
 				do
 				{
 					var req = _svc.Events.List(_calId);
-					// instance mode: expand recurrences; series mode: return masters + exceptions.
-					// (Must be consistent across full/incremental for a given syncToken.)
+					// Instance mode expands recurrences; series mode returns masters and
+					// exceptions. A syncToken requires the same setting on every request.
 					req.SingleEvents = !_seriesMode;
-					req.ShowDeleted = true;       // include cancelled (deletion propagation)
+					req.ShowDeleted = true;       // cancelled events carry deletions
 					req.MaxResults = 2500;
 					if (useIncremental)
 					{
-						req.SyncToken = state.syncToken;   // token remembers timeMin/timeMax; must NOT resend them
+						req.SyncToken = state.syncToken;   // the token keeps timeMin/timeMax; resending them is an error
 					}
 					else
 					{
@@ -145,7 +140,7 @@ namespace Core.MTCalSync
 			}
 			catch (GoogleApiException gae) when (gae.HttpStatusCode == HttpStatusCode.Gone)
 			{
-				// syncToken expired (410) — full resync.
+				// Expired syncToken: full resync.
 				Common.writeToLog("Google sync token 410 (Gone) — full resync.");
 				return await GetChangesAsync(window, new SyncState { pairID = state.pairID, provider = Providers.Google }, true);
 			}
@@ -156,7 +151,7 @@ namespace Core.MTCalSync
 			return cs;
 		}
 
-		// ── targeted reads ──────────────────────────────────────────────────
+		// Targeted reads
 		public async Task<RemoteEvent?> GetAsync(string eventId)
 		{
 			try { return ToRemoteEvent(await _svc.Events.Get(_calId, eventId).ExecuteAsync()); }
@@ -225,14 +220,14 @@ namespace Core.MTCalSync
 			catch (Exception ex) { ThrowIfTransient(ex, "google.FindByICalUidAsync"); Common.writeToLog("WARN FindByICalUidAsync (google): " + ex.Message); return null; }
 		}
 
-		// ── writes ──────────────────────────────────────────────────────────
+		// Writes
 		public async Task<RemoteRef> CreateAsync(ProjectedUnit u, long pairId, long version)
 		{
 			var ev = BuildEvent(u, pairId, version);
 			try
 			{
 				var req = _svc.Events.Insert(ev, _calId);
-				req.SendUpdates = EventsResource.InsertRequest.SendUpdatesEnum.None;   // SAFETY: never notify
+				req.SendUpdates = EventsResource.InsertRequest.SendUpdatesEnum.None;   // never notify
 				req.SupportsAttachments = false;
 				var created = await req.ExecuteAsync();
 				return new RemoteRef { Id = created.Id ?? string.Empty, Etag = created.ETag ?? string.Empty, ICalUid = created.ICalUID ?? string.Empty };
@@ -265,7 +260,7 @@ namespace Core.MTCalSync
 			catch (Exception ex) { throw Translate(ex, "google.delete"); }
 		}
 
-		// ── mapping helpers ─────────────────────────────────────────────────
+		// Mapping helpers
 		private Event BuildEvent(ProjectedUnit u, long pairId, long version)
 		{
 			var ev = new Event
@@ -277,13 +272,13 @@ namespace Core.MTCalSync
 				Visibility = u.IsPrivate ? "private" : "default",
 				Start = ToGoogleDate(u.StartUtc, u.IsAllDay),
 				End = ToGoogleDate(u.EndUtc, u.IsAllDay),
-				// SAFETY: never set Attendees on a mirror event.
+				// Never set Attendees on a mirror event.
 				ExtendedProperties = new Event.ExtendedPropertiesData
 				{
 					Private__ = new Dictionary<string, string>(ProvenanceStamp.Build(u, pairId, version))
 				}
 			};
-			// Series master → carry the recurrence rule.
+			// A series master carries its recurrence rule.
 			if (u.UnitKind == UnitKinds.SeriesMaster && !string.IsNullOrWhiteSpace(u.RecurrenceRule))
 				ev.Recurrence = new List<string> { "RRULE:" + u.RecurrenceRule };
 			return ev;
@@ -297,7 +292,7 @@ namespace Core.MTCalSync
 			return null;
 		}
 
-		// ── series-mode instance overrides ──────────────────────────────────
+		// Series-mode instance overrides
 		public async Task<RemoteRef> UpsertInstanceAsync(string mirrorMasterId, DateTime originalStartUtc, ProjectedUnit u, long pairId, long version)
 		{
 			try
@@ -312,7 +307,7 @@ namespace Core.MTCalSync
 				inst.Start = ToGoogleDate(u.StartUtc, u.IsAllDay);
 				inst.End = ToGoogleDate(u.EndUtc, u.IsAllDay);
 				inst.Status = "confirmed";
-				inst.ExtendedProperties = new Event.ExtendedPropertiesData   // provenance (inline echo + recovery)
+				inst.ExtendedProperties = new Event.ExtendedPropertiesData   // provenance stamp (echo detection, recovery)
 				{
 					Private__ = new Dictionary<string, string>(ProvenanceStamp.Build(u, pairId, version))
 				};
@@ -384,7 +379,7 @@ namespace Core.MTCalSync
 				re.RecurrenceRule = ExtractRRule(e.Recurrence);
 			}
 
-			// times
+			// Times
 			if (e.Start?.Date != null)
 			{
 				re.IsAllDay = true;
@@ -398,7 +393,7 @@ namespace Core.MTCalSync
 				re.EndUtc = e.End?.DateTimeDateTimeOffset?.UtcDateTime ?? re.StartUtc;
 			}
 
-			// show-as
+			// Show-as
 			if (string.Equals(e.Transparency, "transparent", StringComparison.OrdinalIgnoreCase)) re.ShowAs = "free";
 			else if (string.Equals(e.Status, "tentative", StringComparison.OrdinalIgnoreCase)) re.ShowAs = "tentative";
 			else re.ShowAs = "busy";
@@ -427,10 +422,9 @@ namespace Core.MTCalSync
 			return DateTime.TryParse(d, out var dt) ? DateTime.SpecifyKind(dt.Date, DateTimeKind.Utc) : DateTime.MinValue;
 		}
 
-		// The lookups behind match-before-create treat a failure as "not found". That is safe
-		// only for a permanent refusal: after a throttle or an outage, "not found" plans a
-		// create and duplicates an event that exists. So those, and a dead grant, end the run
-		// instead, and the next run looks again.
+		// Match-before-create lookups treat a failure as "not found", which is safe only for
+		// a permanent refusal. A throttle, outage or dead grant would plan a duplicate
+		// create, so those end the run and the next run looks again.
 		private void ThrowIfTransient(Exception ex, string op)
 		{
 			var pe = Translate(ex, op);
@@ -440,9 +434,8 @@ namespace Core.MTCalSync
 		private ProviderException Translate(Exception ex, string op)
 		{
 			NeedsReauthException.ThrowIfWrapped(ex);
-			// Delegated path: a refresh rejected with invalid_grant means the user's
-			// grant is dead (revoked / expired consent) — flag the account and raise
-			// the reauth signal instead of a retryable provider error.
+			// OAuth path: invalid_grant on refresh means the grant is revoked or expired,
+			// so flag the account for reauth instead of raising a retryable error.
 			if (ex is Google.Apis.Auth.OAuth2.Responses.TokenResponseException tre)
 			{
 				if (_oauthAccountId > 0 && tre.Error?.Error == "invalid_grant")

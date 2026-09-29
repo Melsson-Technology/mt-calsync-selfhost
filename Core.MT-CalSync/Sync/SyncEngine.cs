@@ -3,8 +3,8 @@ namespace Core.MTCalSync
 	// The invariant core. One oneshot run over one sync_pair:
 	//   lease → pull deltas per source side → classify (echo/native/delete) →
 	//   plan ops → circuit-breaker → apply (retry/dead-letter) → persist tokens.
-	// Governing invariant: a mirror is a read-only reflection of exactly one origin
-	// event; the origin side always wins.
+	// Governing invariant: a mirror is a read-only reflection of a single origin event,
+	// and the origin side always wins.
 	public class SyncEngine
 	{
 		private enum OpKind { Create, Update, Delete, InstanceUpsert, InstanceCancel }
@@ -33,10 +33,9 @@ namespace Core.MTCalSync
 		private RollingWindow _window = new();        // what gets mirrored
 		private RollingWindow _tokenRange = new();    // what a full list reads, and so what its token covers
 
-		// How far past the window's end a full list reaches. The window slides forward with the
-		// clock and a token only reports changes inside the range it was minted over, so without
-		// this margin a token was stale a minute after it was minted. Two days is twice the gap
-		// between daily full resyncs, so a stored token outlives one missed resync.
+		// How far past the window's end a full list reaches. The window slides with the clock and
+		// a token only reports changes inside the range it was minted over, so the margin keeps a
+		// token valid between full resyncs. Two days outlives one missed daily resync.
 		private static readonly TimeSpan TokenSlack = TimeSpan.FromDays(2);
 		private readonly Dictionary<string, ICalendarProvider> _providers = new();
 		private readonly EventMapping _map = new();
@@ -102,8 +101,7 @@ namespace Core.MTCalSync
 				var s = SyncRun.start(_pair.pairID, trigger, "incremental"); s.finish("skipped_locked"); return s;
 			}
 
-			// A dry run gets an unsaved run: a recorded one showed up as the pair's latest
-			// "success" on the Dashboard and in history, for a sync that applied nothing.
+			// A dry run gets an unsaved run, so a preview never shows as the pair's latest success.
 			var run = _dryRun
 				? new SyncRun { pairID = _pair.pairID, triggerType = "dry-run", syncType = "incremental", status = "running" }
 				: SyncRun.start(_pair.pairID, trigger, "incremental");
@@ -112,7 +110,7 @@ namespace Core.MTCalSync
 			{
 				BuildProviders();
 
-				// ── plan: pull + classify per source side ────────────────────
+				// Plan: pull and classify each source side.
 				var ops = new List<SyncOp>();
 				foreach (var side in Directions.SourceSides(_pair.direction))
 				{
@@ -144,24 +142,21 @@ namespace Core.MTCalSync
 					}
 				}
 
-				// Apply series masters/singles BEFORE their instance overrides — an
-				// exception's mirror master must exist first (stable sort preserves order).
+				// Masters and singles apply before occurrence overrides, which need their mirror
+				// master to exist. The sort is stable.
 				ops = ops.OrderBy(o => o.IsInstanceOp ? 1 : 0).ToList();
 
-				// The breaker counts every planned write, updates included, with the
-				// occurrences of one recurring series counted once: adding a weekly meeting in
-				// instance mode plans a create per week, and that is one change, not nine. A
-				// pair's first sync, before it has any mirrors, may create up to
-				// FirstSyncAllowance; after that the pair's own limit applies.
+				// The breaker counts every planned write, updates included, and counts a recurring
+				// series once (instance mode plans a create per occurrence). A first sync may make
+				// up to FirstSyncAllowance; after that the pair's own limit applies.
 				int planned = ops.Select(ChangeKey).Distinct().Count();
 				bool firstSync = _map.countActive(_pair.pairID) == 0;
 				int limit = firstSync ? Math.Max(_pair.maxWritesPerRun, FirstSyncAllowance) : _pair.maxWritesPerRun;
 				bool overBreaker = planned > limit && !_force;
 
-				// ── dry run: show the plan, touch nothing ────────────────────
-				// Ahead of the circuit breaker on purpose. A preview is how an operator
-				// finds out whether a pair would trip it, so it has to print the plan
-				// either way, and a preview must never page anyone.
+				// Dry run: print the plan and change nothing. It comes before the breaker because a
+				// preview is how an operator learns whether a pair would trip it, and a preview
+				// never alerts anyone.
 				if (_dryRun)
 				{
 					Console.WriteLine($"DRY RUN — pair {_pair.pairID} ({_pair.name}): {ops.Count} op(s)");
@@ -178,7 +173,7 @@ namespace Core.MTCalSync
 					return run;
 				}
 
-				// ── circuit breaker ──────────────────────────────────────────
+				// Circuit breaker
 				if (overBreaker)
 				{
 					string msg = $"Circuit breaker: {planned} planned changes exceed the limit of {limit}. Nothing was applied, " +
@@ -196,10 +191,10 @@ namespace Core.MTCalSync
 				// saved only now, so a run the breaker stops leaves the database as it found it.
 				foreach (var m in _deferredMappings) m.save();   // a dry run returned above, so it saves none
 
-				// ── apply ────────────────────────────────────────────────────
+				// Apply
 				foreach (var op in ops) await ApplyWithRetry(op, run);
 
-				// ── persist tokens only after a successful apply pass ────────
+				// Persist tokens only after the apply pass.
 				foreach (var side in Directions.SourceSides(_pair.direction))
 				{
 					if (!pendingTokens.TryGetValue(side, out var pt)) continue;
@@ -216,14 +211,12 @@ namespace Core.MTCalSync
 			}
 			catch (NeedsReauthException nre)
 			{
-				// A user's OAuth grant died (revoked/expired) — not a sync fault. File
-				// the run as skipped_auth (no dead-letter, no admin alert) and nudge the
-				// OWNER to reconnect, once per 24h.
+				// A revoked or expired OAuth grant is not a sync fault: record skipped_auth (no
+				// dead-letter, no operator alert) and ask the owner to reconnect, once per 24h.
 				run.errorText = nre.Message;
 				run.finish("skipped_auth");
 				Common.audit($"pair={_pair.pairID} op=auth result=skipped_auth account={nre.OAuthAccountId}");
-				// A dry run is someone at a terminal asking what would happen: tell them
-				// here rather than emailing the owner about a preview.
+				// A dry run reports to the terminal rather than emailing the owner about a preview.
 				if (_dryRun) Console.WriteLine($"DRY RUN stopped: {nre.Message}");
 				else NotifyOwnerReauth(nre);
 				return run;
@@ -233,17 +226,12 @@ namespace Core.MTCalSync
 				run.errorText = ex.Message;
 				run.finish("failed");
 				Common.writeToLog($"FATAL sync pair {_pair.pairID}:", ex);
-				// Without this a failed dry run printed nothing at all: the reason went only
-				// to the log file, and the operator's first sign of it was the alert email.
+				// A failed dry run prints its reason, which otherwise reaches only the log.
 				if (_dryRun) Console.WriteLine($"DRY RUN failed: {ex.Message}");
-				// Transient provider conditions — 429 throttling, 5xx / "request queue
-				// full" overload, transport retry-exhaustion — are ACCOUNT-wide (quotas
-				// are per account, not per pair) and self-healing. Park the affected
-				// account(s) briefly and stay QUIET: the scheduler escalates to the
-				// owner only once failures persist (>=3 consecutive), so a single
-				// Microsoft/Google blip never pages anyone. Only a genuine
-				// (non-transient) failure — a real bug — alerts the operator at once,
-				// and never for a dry run.
+				// Transient provider conditions (429, 5xx, transport retry exhaustion) are
+				// account-wide and self-healing: back the account off and stay quiet. The
+				// scheduler tells the owner after 3 consecutive failures. Only a non-transient
+				// failure alerts the operator at once, and never for a dry run.
 				if (ex is ProviderException { IsTransient: true } transient)
 					BackoffAccounts(transient.RetryAfterSeconds, ex.Message);
 				else if (!_dryRun && new SyncPair().shouldAlert(_pair.pairID))
@@ -256,9 +244,8 @@ namespace Core.MTCalSync
 			}
 		}
 
-		// The operator reads this in a mail client, often on a phone. The body used to be
-		// the raw stack trace, which buried the one line that says what's wrong, so lead
-		// with that and what happens next, and keep the trace at the end for a bug report.
+		// Often read on a phone: lead with what's wrong and what happens next, and keep the
+		// stack trace at the end for a bug report.
 		private string FailureAlertBody(Exception ex) =>
 			$"Sync pair {_pair.pairID} (\"{_pair.name}\") failed at {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC.\n\n" +
 			$"{ex.Message}\n\n" +
@@ -266,10 +253,9 @@ namespace Core.MTCalSync
 			$"To see its recent runs, use `history --pair {_pair.pairID}` on the worker CLI.\n\n" +
 			"Technical details, for a bug report:\n" + ex;
 
-		// Set backoffUntil on this pair's delegated account(s) after a transient
-		// provider condition (429 / 5xx / transport retry-exhaustion). The op prefix
-		// in the message identifies the throttled side ("graph." / "google."); when
-		// ambiguous, park both — over-caution just delays one cycle.
+		// Backs off this pair's delegated accounts after a transient provider condition. The
+		// message's op prefix ("graph." / "google.") names the throttled side; without one,
+		// both sides back off, which costs at most one cycle.
 		private void BackoffAccounts(int? retryAfterSeconds, string message)
 		{
 			try
@@ -292,8 +278,7 @@ namespace Core.MTCalSync
 			catch (Exception ex) { Common.writeToLog("ERROR BackoffAccounts:", ex); }
 		}
 
-		// "Reconnect your account" email to the pair's owner, deduped to one per
-		// account per 24h via lastReauthNotifyAt.
+		// Asks the pair's owner to reconnect, at most once per account per 24h.
 		private void NotifyOwnerReauth(NeedsReauthException nre)
 		{
 			try
@@ -302,9 +287,8 @@ namespace Core.MTCalSync
 				if (account.oauthAccountID == 0) return;
 				if (account.lastReauthNotifyAt.HasValue && account.lastReauthNotifyAt.Value > DateTime.UtcNow.AddHours(-24)) return;
 
-				// WHO/HOW is the hosting layer's call (self-host = operator SMTP; hosted =
-				// per-owner template + ledger). WHEN — the 24h dedupe above — is ours; stamp
-				// it only if a notification actually went out.
+				// The host decides who is told and how; the engine owns the 24h dedupe, and
+				// stamps it only when a notification went out.
 				if (OwnerNotifier.Current.ReauthNeeded(account, nre.Provider))
 					account.recordReauthNotify(account.oauthAccountID);
 			}
@@ -327,19 +311,15 @@ namespace Core.MTCalSync
 			return now.Hour == _pair.fullResyncHour && state.lastFullResyncAt.Value.Date < now.Date;
 		}
 
-		// A stored token is good while the range it was minted over still covers the live
-		// window. It used to be checked against the range of the previous run's window, which
-		// the clock had already moved past, so every run listed both calendars in full, and a
-		// full Graph list never reports a deletion.
+		// A stored token is good while the range it was minted over covers the live window.
+		// Otherwise the run lists in full, and a full Graph list never reports a deletion.
 		private static bool TokenCovers(SyncState state, RollingWindow live) =>
 			state.HasToken && state.windowStart.HasValue && state.windowEnd.HasValue
 			&& state.windowStart.Value <= live.StartUtc && state.windowEnd.Value >= live.EndUtc;
 
-		// One side's changes. A full list shows only what exists now, so it can't report an
-		// event deleted since the last run (a full Graph list never includes deleted events at
-		// all). When a full list is due while a token is still held, read the token first and
-		// keep the deletions it reports; otherwise the daily full resync would drop a deletion
-		// made in the minutes before it.
+		// One side's changes. A full list shows only what exists now, so it can't report a
+		// deletion. When a full list is due while a token is held, read the token first and
+		// keep the deletions it reports.
 		private async Task<ChangeSet> PullChanges(string side, SyncState state, bool forceFull)
 		{
 			var provider = _providers[side];
@@ -350,10 +330,8 @@ namespace Core.MTCalSync
 			try { pending = await provider.GetChangesAsync(_tokenRange, state, false); }
 			catch (ProviderException pe) when (!pe.IsTransient)
 			{
-				// A token the provider refuses is abandoned rather than retried every run until
-				// someone clears it. The providers already turn a 410 into a full list; any other
-				// refusal gets the same treatment here. If the calendar itself is the problem, the
-				// full list fails the same way and says so.
+				// A refused token is abandoned for a full list, as providers already do for a 410.
+				// If the calendar itself is the problem, the full list fails and says so.
 				Common.writeToLog($"pair={_pair.pairID} {side} token refused ({pe.Message}); listing in full instead.");
 				return await provider.GetChangesAsync(_tokenRange, state, true);
 			}
@@ -365,18 +343,17 @@ namespace Core.MTCalSync
 			return full;
 		}
 
-		// ── classify one change on source side ──────────────────────────────
+		// Classify one change from a source side.
 		private async Task<SyncOp?> Classify(string side, RemoteEvent c, SyncRun run)
 		{
 			if (string.IsNullOrEmpty(c.Id)) { run.skippedCount++; return null; }
 
-			// dead-letter: skip poison items so one can't fail the whole pair.
+			// Skip dead-lettered items so one poison event can't fail the whole pair.
 			if (_dl.hasOpen(_pair.pairID, side, c.Id)) { run.skippedCount++; return null; }
 
-			// Series-mode exception (modified/cancelled single occurrence) — routed
-			// specially. Echo-safety uses the SERIES MASTER relationship (independent of
-			// instance-id stability): if the exception's master is our mirror, so is the
-			// exception. Masters/singles fall through to the generic path below.
+			// A series-mode exception (modified or cancelled occurrence). Its echo safety comes
+			// from the series master, not the instance id: if the master is our mirror, so is
+			// the exception.
 			if (_pair.SeriesMode && c.IsRecurringInstance)
 				return ClassifyException(side, c, run);
 
@@ -385,18 +362,14 @@ namespace Core.MTCalSync
 			var m = _map.findBySideKey(_pair.pairID, side, Common.Sha256Hex(c.Id))
 				?? _deferredMappings.FirstOrDefault(d => d.EventIdForSide(side) == c.Id);
 
-			// A tombstoned mapping is finished with: its mirror was deleted, or a teardown chose to
-			// keep it. Seeing the deletion again changes nothing. Without this, every full list that
-			// still showed a cancelled Google event sent another delete for a mirror already gone.
+			// A tombstoned mapping is finished: its mirror was deleted, or a teardown kept it. A
+			// repeated deletion (a full Google list still shows cancelled events) sends nothing.
 			if (m != null && m.status == "tombstoned" && c.IsDeleted) { run.skippedCount++; return null; }
 
-			// EntryID-churn recovery: Exchange reissues an event's id on some edits/accepts,
-			// so the side-key lookup can miss an event we ALREADY mirror. Left unhandled it
-			// falls through to Create and duplicates the mirror (edit→revert = 2 churns = 3
-			// copies). The origin iCalUId survives that churn — recover the existing mapping
-			// by it (native origin-side singles/masters only) and re-key it to the reissued id
-			// so the normal update/no-op path below takes over. Skips our own mirrors (echo)
-			// and @removed deltas (no uid).
+			// Exchange reissues an event's id on some edits and accepts, so the side-key lookup
+			// can miss an event already mirrored, and a Create would duplicate the mirror. The
+			// iCalUId survives the reissue: recover the mapping by it and re-key it to the new id.
+			// Native origin-side singles and masters only; echoes and deletions have no uid.
 			if (m == null && !c.IsDeleted && !c.IsRecurringInstance && !string.IsNullOrEmpty(c.ICalUid)
 				&& !c.Stamp.IsOurMirrorOn(side, _pair.pairID))
 			{
@@ -412,46 +385,42 @@ namespace Core.MTCalSync
 				}
 			}
 
-			// echo: our own mirror coming back (stamp inline, or mapping says origin!=side).
+			// Echo: our own mirror coming back (stamped, or the mapping's origin is the other side).
 			bool isEcho = c.Stamp.IsOurMirrorOn(side, _pair.pairID) || (m != null && m.originProvider != side);
 			if (isEcho) return HandleEcho(side, c, m, run);
 
-			// cross-pair foreign mirror: this pair has no mapping for `c`, but another pair
-			// wrote it into this (shared) destination calendar as ITS mirror. It's not a
-			// native change here — never re-mirror it (would leak a sibling pair's events).
-			// The delta read doesn't expand our provenance stamp, so the mapping table is the
-			// reliable signal. Also test the series-master id in case `c` is an expanded
-			// occurrence of a mirror master written by a series-mode pair.
+			// Another pair's mirror in a shared calendar is never re-mirrored here. A delta read
+			// doesn't return the stamp, so the mapping table is the signal. The series-master id
+			// catches an expanded occurrence of another series-mode pair's mirror master.
 			if (m == null &&
 				(_map.isMirrorInAnotherPair(_pair.pairID, side, Common.Sha256Hex(c.Id)) ||
 				 (!string.IsNullOrEmpty(c.SeriesMasterId) &&
 				  _map.isMirrorInAnotherPair(_pair.pairID, side, Common.Sha256Hex(c.SeriesMasterId)))))
 			{ run.skippedCount++; return null; }
 
-			// native source change.
+			// Native source change.
 			if (c.IsDeleted)
 			{
 				if (m != null && m.originProvider == side)
 					return new SyncOp { Kind = OpKind.Delete, SrcSide = side, DstSide = Providers.Other(side), SourceId = c.Id, Mapping = m, Source = c };
-				run.skippedCount++; return null;   // deletion of an unmapped event — nothing to mirror
+				run.skippedCount++; return null;   // an unmapped event's deletion: nothing to mirror
 			}
 
 			var units = _projection.Project(c, _pair, _window);
 			if (units.Count == 0) { run.skippedCount++; return null; }
 			var u = units[0];   // one unit per source event (single or series master)
 
-			// rolling-window filter (Google returns a whole/bounded set; Graph is windowed).
-			// Never window-filter a series master — its start may predate the window while
-			// the series extends into it.
+			// Rolling-window filter. A series master is exempt: it may start before the window
+			// while the series runs into it.
 			if (u.UnitKind != UnitKinds.SeriesMaster && !_window.Contains(u.StartUtc)) { run.skippedCount++; return null; }
 
 			if (m != null)   // existing mapping where `side` is the origin
 			{
-				if (u.Hash == m.projectedHash) { run.skippedCount++; return null; }   // no functional change / echo of our write
+				if (u.Hash == m.projectedHash) { run.skippedCount++; return null; }   // nothing mirrored has changed
 				return new SyncOp { Kind = OpKind.Update, SrcSide = side, DstSide = Providers.Other(side), SourceId = c.Id, Unit = u, Source = c, Mapping = m };
 			}
 
-			// no mapping → match-before-create ladder on the destination.
+			// No mapping: look for an existing mirror on the destination before creating one.
 			string dst = Providers.Other(side);
 			RemoteEvent? existing = await _providers[dst].FindByStampAsync(_pair.pairID, u.OriginId);
 			if (existing == null && !string.IsNullOrEmpty(u.OriginICalUid))
@@ -459,7 +428,7 @@ namespace Core.MTCalSync
 
 			if (existing != null)
 			{
-				// adopt: link origin(side)=c and the existing mirror; update if stale.
+				// Adopt: link `c` to the existing mirror, and update it if stale.
 				var adopted = BuildMapping(side, c, dst, existing, u);
 				adopted.projectedHash = existing.Stamp.Managed ? existing.Stamp.Hash : u.Hash;
 				adopted.mirrorVersion = existing.Stamp.Version;
@@ -473,21 +442,19 @@ namespace Core.MTCalSync
 			return new SyncOp { Kind = OpKind.Create, SrcSide = side, DstSide = dst, SourceId = c.Id, Unit = u, Source = c };
 		}
 
-		// Series-mode exception: a modified/cancelled single occurrence of a recurring
-		// series. Applied as an override on the MIRROR master's matching instance. The
-		// mirror master id is resolved at apply time (the master op may run earlier in the
-		// same plan). Echo-safety is by the master relationship, so no per-instance stamp
-		// tracking is required for correctness (the override is still stamped as hygiene).
+		// A modified or cancelled occurrence, applied as an override on the mirror master's
+		// matching instance. The mirror master id is resolved at apply time, since the master's
+		// op may run earlier in the same plan. Echo safety comes from the master, so the
+		// override's own stamp isn't needed for correctness.
 		private SyncOp? ClassifyException(string side, RemoteEvent c, SyncRun run)
 		{
 			string masterId = c.SeriesMasterId ?? string.Empty;
 			if (string.IsNullOrEmpty(masterId)) { run.skippedCount++; return null; }
 
 			var masterMap = _map.findBySideKey(_pair.pairID, side, Common.Sha256Hex(masterId));
-			// Echo: the master on `side` is OUR mirror → this exception is our echo too.
+			// The master on `side` is our mirror, so this exception is an echo.
 			if (masterMap != null && masterMap.originProvider != side) { run.echoSkippedCount++; return null; }
-			// Cross-pair foreign mirror: the master belongs to another pair's mirror in this
-			// shared calendar → this exception isn't ours to propagate.
+			// The master is another pair's mirror in a shared calendar: not ours to propagate.
 			if (masterMap == null && _map.isMirrorInAnotherPair(_pair.pairID, side, Common.Sha256Hex(masterId)))
 			{ run.skippedCount++; return null; }
 
@@ -502,27 +469,22 @@ namespace Core.MTCalSync
 			var u = units[0];
 			if (!_window.Contains(u.StartUtc)) { run.skippedCount++; return null; }   // moved out of window
 
-			// change detection: unchanged exception → no-op.
+			// An unchanged exception is a no-op.
 			var exMap = _map.findByOccurrence(_pair.pairID, side, masterId, origStart);
 			if (exMap != null && exMap.projectedHash == u.Hash) { run.skippedCount++; return null; }
 
 			return new SyncOp { Kind = OpKind.InstanceUpsert, SrcSide = side, DstSide = dst, SourceId = c.Id, OriginMasterId = masterId, OrigStartUtc = origStart, Unit = u, Source = c, Mapping = exMap };
 		}
 
-		// Echo handling. `c` is our own mirror coming back on `side`.
-		//
-		// Loop-safety: we recognize mirrors STRUCTURALLY (stamp/mapping), never by
-		// re-projecting their (provider-normalized) content. A changed etag is treated
-		// as a benign provider bump — we refresh the stored etag and skip. A human edit
-		// to a mirror is therefore not force-reverted on the spot; instead the next
-		// change to the ORIGIN overwrites the mirror (origin wins, eventually) via the
-		// reliable origin-vs-origin hash in Classify. This deliberately avoids the
-		// body/HTML-normalization ping-pong that immediate content-revert would risk.
+		// `c` is our own mirror coming back on `side`. Mirrors are recognised by stamp or
+		// mapping, never by re-projecting their provider-normalised content, which would
+		// ping-pong on body/HTML normalisation. A changed etag is a provider bump: refresh it
+		// and skip. A human edit to a mirror stays until the next origin change overwrites it.
 		private SyncOp? HandleEcho(string side, RemoteEvent c, EventMapping? m, SyncRun run)
 		{
 			if (m == null)
 			{
-				// Stamped as ours but no mapping (e.g. DB restored) → adopt from the stamp.
+				// Stamped as ours with no mapping (a restored database, say): adopt from the stamp.
 				var rebuilt = new EventMapping
 				{
 					pairID = _pair.pairID,
@@ -538,7 +500,7 @@ namespace Core.MTCalSync
 			}
 
 			if (!_dryRun && !string.IsNullOrEmpty(c.Etag) && m.EtagForSide(side) != c.Etag)
-				m.refreshMirrorEtag(side, c.Etag);   // benign provider bump — converge, no write
+				m.refreshMirrorEtag(side, c.Etag);   // provider bump: converge without a write
 			run.echoSkippedCount++;
 			return null;
 		}
@@ -562,7 +524,7 @@ namespace Core.MTCalSync
 			return m;
 		}
 
-		// ── apply with retry / dead-letter ──────────────────────────────────
+		// Apply with retry, then dead-letter.
 		private async Task ApplyWithRetry(SyncOp op, SyncRun run)
 		{
 			int attempts = 0;
@@ -672,8 +634,8 @@ namespace Core.MTCalSync
 				}
 				case OpKind.InstanceUpsert:
 				{
-					// Override a single instance of the mirror recurring master. The master
-					// mirror id is resolved now (its create/update ran earlier this plan).
+					// Override one instance of the mirror master, whose id is resolved now because
+					// its create or update ran earlier in this plan.
 					string mirrorMasterId = MirrorMasterId(op.SrcSide, op.DstSide, op.OriginMasterId);
 					if (string.IsNullOrEmpty(mirrorMasterId))
 						throw new ProviderException("exception: series master not mapped yet", "no-master", false);

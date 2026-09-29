@@ -8,7 +8,7 @@ namespace Core.MTCalSync
 		public string ICalUid { get; set; } = string.Empty;
 	}
 
-	// A calendar the connection's principal can see (calendar-discovery / picker).
+	// A calendar the connection's principal can see.
 	public class RemoteCalendar
 	{
 		public string Id { get; set; } = string.Empty;          // provider calendar id (Google: address / group id)
@@ -18,8 +18,8 @@ namespace Core.MTCalSync
 		public bool Primary { get; set; }                        // the principal's own primary calendar
 	}
 
-	// Builds the mtcs_* provenance stamp written into every mirror event (Graph
-	// singleValueExtendedProperties / Google extendedProperties.private).
+	// The mtcs_* provenance stamp written into every mirror event (Graph
+	// singleValueExtendedProperties, Google extendedProperties.private).
 	public static class ProvenanceStamp
 	{
 		public static Dictionary<string, string> Build(ProjectedUnit u, long pairId, long version) => new()
@@ -35,42 +35,37 @@ namespace Core.MTCalSync
 		};
 	}
 
-	// One calendar endpoint we can read incrementally and write mirrors to. All
-	// writes obey the hard safety rules: NO attendees on mirror events, and NO
-	// notifications (Google sendUpdates=none; Graph has no attendees so nothing is sent).
+	// A calendar read incrementally and written with mirrors. Writes never add attendees
+	// and never notify (Google sends sendUpdates=none; with no attendees Graph sends nothing).
 	public interface ICalendarProvider
 	{
 		string Provider { get; }   // m365|google
 
-		// Enumerate the calendars the principal can access (calendar picker). Google
-		// returns the impersonated user's calendar list (primary + shared/subscribed);
-		// Graph returns none: its destination is always the mailbox default calendar.
+		// The calendars the principal can access: the user's calendar list on Google,
+		// the mailbox's calendars on Graph.
 		Task<IReadOnlyList<RemoteCalendar>> ListCalendarsAsync();
 
-		// Incremental pull: the changes since the stored token, or every event in `window` when
-		// forceFull is set or there is no token. A full list's new token covers `window`; the
-		// caller decides when a stored token no longer covers what it needs (SyncEngine.
-		// TokenCovers). An expired token (410) falls back to a full list. Returns the changed
-		// events plus the new deltaLink/syncToken to persist AFTER a successful apply.
+		// Changes since the stored token, or every event in `window` when forceFull is set or
+		// there is no token; an expired token (410) falls back to a full list. The caller
+		// decides when a token no longer covers the window (SyncEngine.TokenCovers) and
+		// persists the returned token only after a successful apply.
 		Task<ChangeSet> GetChangesAsync(RollingWindow window, SyncState state, bool forceFull);
 
-		// Targeted reads (repair / match-before-create ladder).
+		// Targeted reads for repair and match-before-create.
 		Task<RemoteEvent?> GetAsync(string eventId);
 		Task<RemoteEvent?> FindByStampAsync(long pairId, string originId);
 		Task<RemoteEvent?> FindByICalUidAsync(string iCalUid);
-		// Every event in this calendar stamped as pair `pairId`'s mirror, capped at
-		// `max`. Support tier (stray-mirror sweep after a failed teardown) — the sync
-		// loop never calls it.
+		// Up to `max` events stamped as pair `pairId`'s mirrors. Used to sweep strays after
+		// a failed teardown; the sync loop never calls it.
 		Task<IReadOnlyList<RemoteEvent>> ListByStampPairAsync(long pairId, int max);
 
-		// Writes — always stamp provenance in the same call; never add attendees/guests.
+		// Writes stamp provenance in the same call and never add attendees.
 		// A unit carrying a RecurrenceRule is written as a recurring master (series mode).
 		Task<RemoteRef> CreateAsync(ProjectedUnit u, long pairId, long version);
 		Task<RemoteRef> UpdateAsync(string eventId, string etag, ProjectedUnit u, long pairId, long version);
 		Task DeleteAsync(string eventId, string etag);
 
-		// Series-mode exception overrides: modify or cancel the single instance of the
-		// mirror recurring master (mirrorMasterId) at the given original start.
+		// Series mode: modify or cancel the mirror series' instance at the original start.
 		Task<RemoteRef> UpsertInstanceAsync(string mirrorMasterId, DateTime originalStartUtc, ProjectedUnit u, long pairId, long version);
 		Task CancelInstanceAsync(string mirrorMasterId, DateTime originalStartUtc);
 	}

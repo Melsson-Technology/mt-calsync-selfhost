@@ -1,4 +1,4 @@
-# build-and-package.ps1 — publish the MT-CalSync engine (worker + self-host portal)
+# build-and-package.ps1: publish the MT-CalSync engine (worker + self-host portal)
 # for linux-x64 and bundle the schema + deploy assets into a tarball.
 #
 # Run from the repository root:  ./scripts/build-and-package.ps1 [-SelfContained]

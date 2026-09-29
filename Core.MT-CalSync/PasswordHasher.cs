@@ -2,11 +2,9 @@ using System.Security.Cryptography;
 
 namespace Core.MTCalSync
 {
-	// One-way password hashing — PBKDF2-SHA256, per-user random salt, fixed-time
-	// verify. Stored format: "{iterations}.{saltBase64}.{hashBase64}", so the cost
-	// can be raised later and old hashes keep verifying (and can be re-hashed on
-	// the next successful login if their iteration count is below current).
-	// Lives in Core (not the web layer) because the worker CLI also sets passwords.
+	// PBKDF2-SHA256 with a random salt and a fixed-time compare. The stored form is
+	// "{iterations}.{saltBase64}.{hashBase64}", so the cost can rise without breaking old
+	// hashes. It lives in Core because the worker CLI also sets passwords.
 	public static class PasswordHasher
 	{
 		private const int Iterations = 100_000;
@@ -39,8 +37,7 @@ namespace Core.MTCalSync
 			return CryptographicOperations.FixedTimeEquals(actual, expected);
 		}
 
-		// Minimal strength gate for a new password. Returns an empty string when the
-		// password is acceptable, else a user-facing reason.
+		// Returns an empty string for an acceptable new password, else the reason to show.
 		public static string CheckStrength(string password)
 		{
 			if (string.IsNullOrEmpty(password) || password.Length < 8)

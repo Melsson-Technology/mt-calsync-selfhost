@@ -2,8 +2,7 @@ using System.Data;
 
 namespace Core.MTCalSync
 {
-	// Non-sync operator commands (add-pair/list/status/history/dead-letters/…).
-	// Logic lives in Core so the Worker CLI stays thin (house convention).
+	// Operator commands other than sync. They live in Core so the Worker CLI stays thin.
 	public static class CliCommands
 	{
 		public static long AddPair(string name, string m365Email, string googleEmail,
@@ -30,8 +29,7 @@ namespace Core.MTCalSync
 
 			var pair = new SyncPair
 			{
-				// Operator pairs belong to the built-in default customer, id 1;
-				// bootstrap-admin claims the userID.
+				// Operator pairs belong to the built-in owner, id 1.
 				customerID = 1,
 				name = string.IsNullOrWhiteSpace(name) ? $"{m365Email} <-> {googleEmail}" : name,
 				leftConnectionID = leftId,
@@ -44,9 +42,8 @@ namespace Core.MTCalSync
 				copyAttendeesToBody = Settings.CopyAttendeesToBody,
 				maxWritesPerRun = Settings.MaxWritesPerRun,
 				fullResyncHour = Settings.FullResyncHour,
-				// Paused. These pairs impersonate mailboxes with app-only credentials, and
-				// the advice has always been to dry-run one before it goes live. Created
-				// enabled, the timer ran it within a minute, before anyone could.
+				// Created paused: the pair acts on mailboxes with app-only credentials, so
+				// the operator dry-runs it before the timer picks it up.
 				enabled = false
 			};
 			long pairId = pair.insert();
@@ -56,12 +53,11 @@ namespace Core.MTCalSync
 			return pairId;
 		}
 
-		// ── shared-calendar mirroring (Portal "Shared calendars" page) ──────────
-		// A shared-calendar mirror is a one-way google→m365 pair that writes into the
-		// mailbox's PRIMARY calendar. Identified by (right connection = google/principal/
-		// calId) + direction right_to_left. Many such pairs can safely share one M365
-		// primary calendar — the engine's cross-pair foreign-mirror guard stops them from
-		// cross-contaminating (and from leaking back through a bidirectional primary pair).
+		// Shared-calendar mirroring
+		// A shared-calendar mirror is a one-way Google-to-M365 pair that writes into the
+		// mailbox's primary calendar, identified by its Google connection and right_to_left.
+		// Many can share one M365 calendar: the cross-pair foreign-mirror guard keeps them
+		// from copying each other's mirrors, or leaking back through a bidirectional pair.
 
 		// The existing mirror pair for a given Google calendar, or null.
 		public static SyncPair? FindSharedPair(string googlePrincipal, string googleCalId)
@@ -78,8 +74,8 @@ namespace Core.MTCalSync
 			return null;
 		}
 
-		// Check → start mirroring a shared Google calendar into the M365 primary calendar.
-		// Idempotent: reuses/re-enables an existing mirror pair for the same calendar.
+		// Starts mirroring a shared Google calendar into the M365 primary calendar.
+		// Idempotent: an existing mirror pair for the calendar is re-enabled and reused.
 		public static long EnableSharedCalendarMirror(string m365Email, string googlePrincipal,
 			string googleCalId, string googleCalSummary)
 		{
@@ -110,7 +106,7 @@ namespace Core.MTCalSync
 
 			var pair = new SyncPair
 			{
-				customerID = 1,   // the built-in default customer
+				customerID = 1,   // the built-in owner
 				name = "Shared: " + label,
 				leftConnectionID = leftId,
 				rightConnectionID = rightId,
@@ -139,17 +135,11 @@ namespace Core.MTCalSync
 			public string Message = string.Empty;
 		}
 
-		// Uncheck / remove-pair. Deletes the events this pair mirrored onto the OTHER
-		// side of each mapping (a bidirectional pair holds mirrors on both sides),
-		// then the pair itself. Safe ordering: disable (stop the timer) → acquire the
-		// per-pair lock (don't race a live run) → read mirror ids BEFORE deleting the
-		// pair (the row delete cascades the mappings away) → stamp-verify + delete
-		// each remote mirror (idempotent on 404) → delete the pair row → drop
-		// now-unreferenced connections on both sides.
-		//
-		// Only this pair's own mirrors are deleted (stamped for the pair and passing
-		// MirrorGuard). A mapping can link two real copies of one meeting, and the
-		// user's copy must survive.
+		// Removes a pair and the mirrors it wrote. Order matters: disable it, take the pair
+		// lock so no run is in flight, then read the mirror ids before deleting the pair,
+		// because the row delete cascades the mappings away. Only events stamped for this
+		// pair that pass MirrorGuard are deleted; a mapping can link two real copies of one
+		// meeting, and the user's copy must survive.
 		public static async Task<TeardownResult> TeardownPair(long pairId, bool alsoDeleteGoogleConnection = true)
 		{
 			var r = new TeardownResult { PairId = pairId };
@@ -178,7 +168,7 @@ namespace Core.MTCalSync
 				int keptReal = 0;
 				foreach (var m in maps)
 				{
-					// The mirror lives on the side OPPOSITE the unit's origin.
+					// The mirror lives on the side opposite the origin.
 					string mirrorSide = Providers.Other(m.originProvider);
 					string mirrorId = m.EventIdForSide(mirrorSide);
 					if (!string.IsNullOrEmpty(mirrorId))
@@ -189,7 +179,7 @@ namespace Core.MTCalSync
 							var ev = await prov.GetAsync(mirrorId);
 							if (ev == null)
 							{
-								// already gone remotely — nothing to delete
+								// already gone remotely
 							}
 							else if (ev.Stamp.PairId == pairId && MirrorGuard.RefusalReason(ev, m.ICalUidForSide(m.originProvider)) == null)
 							{
@@ -198,10 +188,15 @@ namespace Core.MTCalSync
 							}
 							else
 							{
-								keptReal++;   // someone's real event, never ours to delete
+								keptReal++;   // a real event, not ours to delete
 							}
 						}
-						catch (Exception ex) { r.Failed++; Common.writeToLog($"teardown pair={pairId} side={mirrorSide} mirror={mirrorId}:", ex); }
+						catch (Exception ex)
+						{
+							// The mapping stays active, so the retry the message asks for finds this mirror again.
+							r.Failed++; Common.writeToLog($"teardown pair={pairId} side={mirrorSide} mirror={mirrorId}:", ex);
+							continue;
+						}
 					}
 					m.tombstone();
 				}
@@ -214,9 +209,8 @@ namespace Core.MTCalSync
 
 				new SyncPair().delete(pairId);   // cascade: mappings / state / runs / dead-letters / lock
 
-				// Drop whichever connections no longer back any pair. (The historical
-				// alsoDeleteGoogleConnection=false only preserves the google side for
-				// callers that manage it themselves.)
+				// Drop connections that no longer back any pair. alsoDeleteGoogleConnection=false
+				// keeps the Google side for callers that manage it themselves.
 				var pc = new ProviderConnection();
 				if (pc.countReferencingPairs(pair.leftConnectionID) == 0)
 					pc.delete(pair.leftConnectionID);
@@ -232,12 +226,10 @@ namespace Core.MTCalSync
 			finally { lockRow.release(); }
 		}
 
-		// Read-only forensic dump: every event currently in the rolling window on BOTH
-		// sides of a pair (optionally filtered by subject substring), with provenance
-		// stamp / attendee count / id / iCalUID. Diagnoses duplicates, orphans, and echo
-		// tangles. Persists nothing (fresh SyncState, token not saved). M365 events are
-		// re-fetched individually so the stamp is populated (calendarView/delta doesn't
-		// expand singleValueExtendedProperties).
+		// Read-only dump of every event in the window on both sides, with stamp, attendee
+		// count, id and iCalUID, for diagnosing duplicates and orphans. Saves no token. M365
+		// events are re-fetched one by one because delta doesn't expand
+		// singleValueExtendedProperties, where the stamp lives.
 		public static async Task Inspect(long pairId, string subjectFilter)
 		{
 			var pair = new SyncPair().getById(pairId);
@@ -270,9 +262,8 @@ namespace Core.MTCalSync
 						Console.WriteLine($"      id={e.Id}");
 						Console.WriteLine($"      uid={e.ICalUid}");
 						Console.WriteLine($"      attendees={e.AttendeeNames.Count}  allDay={e.IsAllDay}  showAs={e.ShowAs}  seriesMaster={e.IsSeriesMaster}");
-						// What the SYNC ENGINE actually saw from the delta read (`it`), before the
-						// per-event GetAsync enrichment (`e`). Divergence here = the delta is lossy,
-						// which is exactly what breaks projection/adoption.
+						// `it` is what the engine saw in the delta read; `e` is the full event. A
+						// difference means the delta is lossy, which breaks projection and adoption.
 						if (conn.provider == Providers.M365 && (it.Subject != e.Subject || it.ICalUid != e.ICalUid || it.IsAllDay != e.IsAllDay || it.IsRecurringInstance != e.IsRecurringInstance))
 							Console.WriteLine($"      delta-read: subj=\"{it.Subject}\" uid=\"{it.ICalUid}\" allDay={it.IsAllDay} type={(it.IsSeriesMaster ? "master" : it.IsRecurringInstance ? "occurrence" : "single")} seriesMasterId={it.SeriesMasterId}");
 						Console.WriteLine($"      stamp: managed={(e.Stamp.Managed ? "YES" : "no")} origin={e.Stamp.OriginSystem} pair={e.Stamp.PairId} oid={e.Stamp.OriginId} originUid={e.Stamp.OriginICalUid}");
@@ -282,9 +273,8 @@ namespace Core.MTCalSync
 			}
 		}
 
-		// Read-only: fetch the event on the far side of every active mapping and report which ones
-		// the sync would refuse to update or delete, and why. Run it before and after a deploy that
-		// touches the write paths.
+		// Read-only: reports which mirrors of active mappings the sync would refuse to update or
+		// delete, and why. Useful before and after a change to the write paths.
 		public static async Task GuardAudit(long pairId)
 		{
 			var pair = new SyncPair().getById(pairId);
@@ -317,8 +307,8 @@ namespace Core.MTCalSync
 			foreach (var kv in refused) Console.WriteLine($"  {kv.Value} × {kv.Key}");
 		}
 
-		// Operator cleanup: delete one mirror event and tombstone its mapping. Refuses anything
-		// that is not this pair's own mirror (see MirrorGuard). Used to clear stray duplicates.
+		// Deletes one mirror event and tombstones its mapping. Refuses anything that is not
+		// this pair's own mirror (see MirrorGuard).
 		public static async Task PurgeMirror(long pairId, string provider, string eventId)
 		{
 			var pair = new SyncPair().getById(pairId);
@@ -330,14 +320,15 @@ namespace Core.MTCalSync
 			var prov = ProviderFactory.Create(conn, pair.SeriesMode);
 			var ev = await prov.GetAsync(eventId);
 			if (ev == null) { Console.WriteLine($"Event {eventId} not found on {provider} (already gone?)."); return; }
-			string? why = ev.Stamp.PairId != pairId ? $"not stamped for pair {pairId}" : MirrorGuard.RefusalReason(ev);
+			var m = new EventMapping().findBySideKey(pairId, provider, Common.Sha256Hex(eventId));
+			string? why = ev.Stamp.PairId != pairId ? $"not stamped for pair {pairId}"
+				: MirrorGuard.RefusalReason(ev, m?.ICalUidForSide(m.originProvider));
 			if (why != null)
 			{
 				Console.WriteLine($"REFUSED: {provider} event \"{ev.Subject}\" is not a mirror of pair {pairId} ({why}). Nothing deleted.");
 				return;
 			}
 			await prov.DeleteAsync(eventId, ev.Etag);
-			var m = new EventMapping().findBySideKey(pairId, provider, Common.Sha256Hex(eventId));
 			if (m != null) m.tombstone();
 			Console.WriteLine($"Deleted {provider} mirror {eventId} (\"{ev.Subject}\"); tombstoned mapping {(m != null ? m.mappingID.ToString() : "none")}.");
 			Common.audit($"purge-mirror pair={pairId} side={provider} id={eventId} mapping={(m != null ? m.mappingID.ToString() : "none")} result=ok");
@@ -406,8 +397,7 @@ namespace Core.MTCalSync
 			return ok;
 		}
 
-		// The circuit breaker's limit for one pair: how many changes one run may make before
-		// it stops and applies nothing.
+		// The circuit breaker's limit: a run that would make more changes applies none.
 		public static bool SetMaxWrites(long pairId, long max)
 		{
 			if (max < 1) { Console.WriteLine("Give the limit as a positive number, for example --max 25."); return false; }
@@ -416,8 +406,8 @@ namespace Core.MTCalSync
 			return ok;
 		}
 
-		// Reset delta/sync tokens for a pair — the next run does a safe full reconcile
-		// (match-before-create converges without duplicating).
+		// Clears the pair's tokens so the next run does a full reconcile; match-before-create
+		// keeps that from duplicating events.
 		public static void Resync(long pairId)
 		{
 			new SyncState().resetTokens(pairId);
@@ -435,7 +425,7 @@ namespace Core.MTCalSync
 			return ok;
 		}
 
-		// Encrypt a secret and store it in the DB settings table (DB-first resolution).
+		// Stores an encrypted secret in the settings table, which overrides settings.xml.
 		// Returns false, having said why, if nothing was stored.
 		public static bool SetSecret(string name, string value)
 		{
@@ -446,9 +436,8 @@ namespace Core.MTCalSync
 			return true;
 		}
 
-		// Set the self-host portal's single operator password (PBKDF2 hash stored in the
-		// settings table). The self-host portal reads Settings.SelfHostAdminPasswordHash.
-		// Returns false, having said why, if the password was not stored.
+		// Sets the portal's operator password, stored as a PBKDF2 hash in
+		// Settings.SelfHostAdminPasswordHash. Returns false, having said why, if not stored.
 		public static bool SetAdminPassword(string password)
 		{
 			if (string.IsNullOrWhiteSpace(password)) { Console.WriteLine("No password given, so nothing was changed. Run set-admin-password and enter it at the prompt."); return false; }
@@ -459,10 +448,8 @@ namespace Core.MTCalSync
 			return true;
 		}
 
-		// saveByName reports failure through errorMessage rather than by throwing, so a caller
-		// that does not look at it announces success for a value that was never stored. The
-		// self-host quick start did exactly that against a database it could not reach: it printed
-		// "Self-host operator password set.", and then no sign-in could ever work.
+		// saveByName reports failure through errorMessage rather than by throwing, so every
+		// save must check it before reporting success.
 		private static bool TrySave(string name, string value)
 		{
 			var settings = new Settings();
@@ -472,13 +459,11 @@ namespace Core.MTCalSync
 			return false;
 		}
 
-		// Dismantle mirror-of-mirror chains: a fresh pair's first sync reads deltas,
-		// and deltas carry no stamps — so a leftover foreign mirror can masquerade as
-		// a real event and get mirrored BACK, doubling the true origin's copies on
-		// both sides. A chain is proven by a targeted read: the mapping's ORIGIN-side
-		// event carries a managed stamp (real events never do). Repair = delete the
-		// bogus mirror we created, delete the fake origin if its stamp names a DEAD
-		// pair, tombstone the mapping; the real event then re-mirrors cleanly.
+		// Dismantles mirror-of-mirror chains. Deltas carry no stamps, so a leftover foreign
+		// mirror can look like a real event and be mirrored back. A chain shows as a mapping
+		// whose origin-side event has a managed stamp, which real events never have. Repair
+		// deletes our mirror, deletes the fake origin only if its pair is gone, and tombstones
+		// the mapping so the real event re-mirrors.
 		public static async Task RepairChains(long pairId, bool apply)
 		{
 			var pair = new SyncPair().getById(pairId);
@@ -514,17 +499,17 @@ namespace Core.MTCalSync
 						$"(stamp pair {origin.Stamp.PairId}{(originPairDead ? ", dead" : ", LIVE!")}) → its '{m.MirrorSide}' copy {Trunc(m.MirrorEventId)} is bogus");
 					if (!apply) continue;
 
-					// 1) the mirror WE minted off the fake origin
+					// 1) the mirror we made of the fake origin
 					try
 					{
 						var mir = string.IsNullOrEmpty(m.MirrorEventId) ? null : await ProviderFor(m.MirrorSide).GetAsync(m.MirrorEventId);
-						if (mir != null && mir.Stamp.PairId == pairId && MirrorGuard.RefusalReason(mir) == null)
+						if (mir != null && mir.Stamp.PairId == pairId && MirrorGuard.RefusalReason(mir, m.ICalUidForSide(originSide)) == null)
 						{ await ProviderFor(m.MirrorSide).DeleteAsync(m.MirrorEventId, m.EtagForSide(m.MirrorSide)); mirrorsDeleted++; }
 					}
 					catch (Exception ex) { Common.writeToLog($"repair-chains pair={pairId} del mirror {m.MirrorEventId}:", ex); }
 
-					// 2) the fake origin itself — only when its stamp names a pair that
-					//    no longer exists (never touch another LIVE pair's mirror)
+					// 2) the fake origin, only when its pair no longer exists; a live
+					//    pair's mirror is never ours to delete
 					if (originPairDead && MirrorGuard.RefusalReason(origin) == null)
 					{
 						try { await ProviderFor(originSide).DeleteAsync(originId, m.EtagForSide(originSide)); fakeOriginsDeleted++; }
@@ -543,12 +528,10 @@ namespace Core.MTCalSync
 
 		private static string Trunc(string s) => s.Length <= 20 ? s : s[..20] + "…";
 
-		// Delete stray mirrors left behind by a pair whose teardown could not finish
-		// (for example, one interrupted part-way through): events in the
-		// LIVE pair's two calendars stamped as belonging to a pair that no longer
-		// exists. Triple-guarded — the stamp must be managed, must name the dead
-		// pair, and the event must not sit inside any live mapping (adopted mirrors
-		// keep their old pair's stamp until their origin next rewrites them).
+		// Deletes mirrors in the live pair's calendars that are stamped for a pair that no
+		// longer exists, such as after an interrupted teardown. The stamp must be managed and
+		// name the dead pair, and the event must not be in any live mapping: adopted mirrors
+		// keep their old pair's stamp until their origin next rewrites them.
 		public static async Task SweepStrays(long livePairId, long deadPairId)
 		{
 			var live = new SyncPair().getById(livePairId);
@@ -587,10 +570,9 @@ namespace Core.MTCalSync
 			finally { lockRow.release(); }
 		}
 
-		// Check that every stored secret is in the current v2 (AES-GCM) format. Pre-v2
-		// ciphertext can no longer be decrypted, so there is nothing left to convert: a legacy
-		// value is reported as one to re-enter. A secret that can't be read is a failure. The
-		// read error used to be dropped, so an unreachable database reported "0 failed".
+		// Checks that every stored secret is in the v2 (AES-GCM) format. Pre-v2 ciphertext
+		// can't be decrypted, so a legacy value is reported for re-entry. A secret that can't
+		// be read counts as a failure.
 		public static bool MigrateSecrets()
 		{
 			if (string.IsNullOrWhiteSpace(Settings.DataEncryptionKey))

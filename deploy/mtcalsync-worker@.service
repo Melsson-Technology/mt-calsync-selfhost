@@ -1,6 +1,6 @@
 [Unit]
 Description=MT-CalSync worker (%i)
-After=network-online.target mysql.service mariadb.service
+After=network-online.target mysql.service
 Wants=network-online.target
 
 # Templated one-shot unit: the instance name is the Worker subcommand, e.g.

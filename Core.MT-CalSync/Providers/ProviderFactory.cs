@@ -1,18 +1,13 @@
 namespace Core.MTCalSync
 {
-	// Builds the right ICalendarProvider for a connection — the single place
-	// credentials are resolved. Two paths, selected by connection.authKind:
-	//   app_default     — global app credentials (Graph app-only client secret /
-	//                     Google service account + DWD). Operator connections.
-	//   delegated_oauth — the owner's stored OAuth grant (oauth_account). Throws
-	//                     NeedsReauthException up front when the grant is flagged,
-	//                     so the engine files a skipped_auth run without touching
-	//                     the network.
+	// Builds the ICalendarProvider for a connection; the one place credentials are
+	// resolved. connection.authKind selects the path:
+	//   app_default     - app credentials (Graph client secret, or Google service account).
+	//   delegated_oauth - the owner's OAuth grant. A flagged grant throws
+	//                     NeedsReauthException before any network call.
 	public static class ProviderFactory
 	{
-		// Tests only. When set, Create returns this instead of a real provider, so a test can
-		// run the whole engine against in-memory calendars. Nothing in the worker or the
-		// portals sets it.
+		// Tests only: lets a test run the engine against in-memory calendars.
 		public static Func<ProviderConnection, bool, ICalendarProvider>? TestOverride { get; set; }
 
 		public static ICalendarProvider Create(ProviderConnection conn, bool seriesMode = false)
@@ -54,7 +49,7 @@ namespace Core.MTCalSync
 			if (conn.provider == Providers.M365)
 			{
 				// Address the mailbox by the immutable Entra object id; a delegated
-				// token may act on /users/{own-oid} exactly like /me.
+				// token treats /users/{own-oid} like /me.
 				var cred = new MsDelegatedTokenCredential(account.oauthAccountID);
 				return new GraphCalendarProvider(cred, account.providerAccountId, conn.calendarId, seriesMode);
 			}

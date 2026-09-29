@@ -2,9 +2,9 @@ using System.Data;
 
 namespace Core.MTCalSync
 {
-	// A single calendar endpoint on one provider (M365 mailbox or Google user).
-	// authKind selects the credential path: app_default (global app credentials —
-	// operator connections) or delegated_oauth (per-user grant via oauthAccountID).
+	// One calendar on one provider (an M365 mailbox or a Google user). authKind picks the
+	// credentials: app_default uses the global app credentials, delegated_oauth uses the
+	// user's grant in oauthAccountID.
 	public class ProviderConnection : @base
 	{
 		public long connectionID { get; set; }
@@ -63,8 +63,8 @@ namespace Core.MTCalSync
 			return list;
 		}
 
-		// Idempotent create (unique on provider+principal+calendar). Returns the id
-		// (existing or new).
+		// Idempotent create, unique on provider + principal + calendar. Returns the id,
+		// existing or new.
 		public long ensure()
 		{
 			var oDA = new DataAccess();
@@ -90,10 +90,9 @@ namespace Core.MTCalSync
 				oDA.insertData(sql, p);
 				if (!string.IsNullOrEmpty(oDA.errorMessage)) { Common.writeToLog("ERROR ProviderConnection.ensure: " + oDA.errorMessage); return 0; }
 
-				// Always read the id back by the unique key. insertData's id is LAST_INSERT_ID(),
-				// which the UPDATE branch of an upsert does not set: it returns whatever the
-				// pooled session inserted last, possibly a row in another table. A pair reusing an
-				// existing connection was wired to the connection created a moment before it.
+				// Read the id back by the unique key. The upsert's UPDATE branch doesn't set
+				// LAST_INSERT_ID(), so insertData would return whatever the pooled session
+				// inserted last, possibly a row in another table.
 				var q = new Dictionary<string, object> { { "@pr", provider }, { "@pe", principalEmail }, { "@ci", calendarId } };
 				object? row = oDA.execScalar("select connectionID from provider_connection where provider=@pr and principalEmail=@pe and calendarId=@ci limit 1", q);
 				connectionID = Common.ToLong(row);
@@ -102,8 +101,8 @@ namespace Core.MTCalSync
 			return connectionID;
 		}
 
-		// How many pairs reference this connection (either side). Callers must check this
-		// is 0 before delete() — the sync_pair→provider_connection FKs are RESTRICT.
+		// How many pairs reference this connection on either side. It must be 0 before
+		// delete(), because the sync_pair foreign keys are RESTRICT.
 		public int countReferencingPairs(long connectionId)
 		{
 			var oDA = new DataAccess();
@@ -113,7 +112,7 @@ namespace Core.MTCalSync
 			return Common.ToInt(v);
 		}
 
-		// Delete a connection. Caller must ensure countReferencingPairs(id)==0 first.
+		// Deletes a connection. The caller checks countReferencingPairs(id) == 0 first.
 		public bool delete(long id)
 		{
 			var oDA = new DataAccess();

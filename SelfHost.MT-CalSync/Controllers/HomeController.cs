@@ -25,8 +25,7 @@ namespace SelfHost.MTCalSync.Controllers
 			return View(vm);
 		}
 
-		// Post/redirect/get. The result used to render straight from the POST, so
-		// refreshing the page re-submitted the form and ran every probe again.
+		// Post/redirect/get, so a refresh doesn't re-run every probe.
 		[HttpPost, ValidateAntiForgeryToken]
 		public IActionResult Test()
 		{
@@ -46,9 +45,8 @@ namespace SelfHost.MTCalSync.Controllers
 			vm.DbOk = string.IsNullOrEmpty(da.errorMessage);
 			vm.DbMessage = vm.DbOk ? "connected" : da.errorMessage;
 
-			// Sign-in clients (what the Calendars page needs) are reported apart from the
-			// app-only credentials. Showing only the latter, as "Microsoft 365" and
-			// "Google", read "incomplete" on a correctly set-up delegated install.
+			// Sign-in clients (what the Calendars page needs) are reported separately from the
+			// app-only credentials, so a delegated-only install doesn't read as incomplete.
 			vm.MsOAuthConfigured = !string.IsNullOrWhiteSpace(Settings.MsOAuthClientId)
 				&& !string.IsNullOrWhiteSpace(Settings.EffectiveMsOAuthClientSecret);
 			vm.GoogleOAuthConfigured = !string.IsNullOrWhiteSpace(Settings.GoogleOAuthClientId)

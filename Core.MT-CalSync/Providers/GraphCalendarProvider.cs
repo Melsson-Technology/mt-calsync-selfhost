@@ -1,3 +1,4 @@
+using System.Globalization;
 using Azure.Identity;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
@@ -5,20 +6,14 @@ using Microsoft.Kiota.Abstractions;
 
 namespace Core.MTCalSync
 {
-	// Microsoft 365 side. Reads via calendarView/delta (windowed + instance-
-	// expanded), writes mirror events with a transactionId (idempotent create) and
-	// singleValueExtendedProperties (provenance). NEVER adds attendees, so Exchange
-	// sends no invitations.
+	// Microsoft 365 provider. Reads calendarView/delta (windowed, instance-expanded);
+	// writes carry a transactionId (idempotent create) and the provenance stamp as
+	// singleValueExtendedProperties. Never adds attendees, so Exchange sends no invitations.
 	//
-	// Two credential shapes share this class: app-only client credentials
-	// (operator connections; principal = mailbox UPN) and a delegated per-user
-	// TokenCredential (principal = the account's immutable Entra object id — a
-	// delegated token may address /users/{own-oid} exactly like /me).
-	//
-	// calendarId selects the calendar: primary/default/'' = the mailbox default
-	// paths; anything else routes reads/creates through Calendars[id]. Event-BY-ID
-	// operations (get/patch/delete/instances) are mailbox-scoped in Exchange and
-	// need no calendar routing.
+	// Credentials are either app-only (principal = mailbox UPN) or delegated
+	// (principal = the user's Entra object id; /users/{own-oid} behaves like /me).
+	// A non-default calendarId routes list and create calls through Calendars[id];
+	// by-id operations are mailbox-scoped and need no routing.
 	public class GraphCalendarProvider : ICalendarProvider
 	{
 		private readonly GraphServiceClient _graph;
@@ -46,7 +41,7 @@ namespace Core.MTCalSync
 		private bool UseDefaultCalendar =>
 			string.IsNullOrWhiteSpace(_calId) || _calId == "primary" || _calId == "default";
 
-		// ── calendar discovery ──────────────────────────────────────────────
+		// Calendar discovery
 		public async Task<IReadOnlyList<RemoteCalendar>> ListCalendarsAsync()
 		{
 			var list = new List<RemoteCalendar>();
@@ -72,7 +67,7 @@ namespace Core.MTCalSync
 			return list;
 		}
 
-		// ── incremental pull ────────────────────────────────────────────────
+		// Incremental pull
 		public async Task<ChangeSet> GetChangesAsync(RollingWindow window, SyncState state, bool forceFull)
 		{
 			var cs = new ChangeSet();
@@ -86,7 +81,7 @@ namespace Core.MTCalSync
 
 			try
 			{
-				// First page (default vs named calendar routing lives in FetchDeltaPage).
+				// FetchDeltaPage handles default vs named calendar routing.
 				var page = await FetchDeltaPage(useIncremental ? state.deltaLink : null, window);
 				cs.WasFullSync = !useIncremental;
 
@@ -99,8 +94,8 @@ namespace Core.MTCalSync
 					if (string.IsNullOrEmpty(page.NextLink)) break;
 					if (++pages >= maxPages)
 					{
-						// Runaway pagination guard (recurring-master expansion loop). Abandon
-						// the delta; next run does a clean full resync.
+						// Guards against runaway recurrence expansion: drop the token so
+						// the next run does a full resync.
 						Common.writeToLog($"Graph delta exceeded {maxPages} pages — abandoning token, forcing full resync next run.");
 						deltaLink = null;
 						break;
@@ -110,7 +105,7 @@ namespace Core.MTCalSync
 			}
 			catch (ApiException ax) when (ax.ResponseStatusCode == 410)
 			{
-				// Delta token expired — full resync.
+				// Expired delta token: full resync.
 				Common.writeToLog("Graph delta 410 (token expired) — full resync.");
 				return await GetChangesAsync(window, new SyncState { pairID = state.pairID, provider = Providers.M365 }, true);
 			}
@@ -121,10 +116,9 @@ namespace Core.MTCalSync
 
 			if (_seriesMode)
 			{
-				// calendarView/delta always EXPANDS recurrences, so we never see masters
-				// directly. Collect the master ids of changed occurrences/exceptions and
-				// fetch each master once (it carries the recurrence rule). Plain unmodified
-				// occurrences are skipped — the mirrored master covers them.
+				// calendarView/delta always expands recurrences, so masters never appear.
+				// Fetch each changed occurrence's master once (it carries the rule); plain
+				// occurrences are skipped because the mirrored master covers them.
 				var masterIds = new HashSet<string>();
 				var removedMasterIds = new HashSet<string>();
 				foreach (var ev in byId.Values)
@@ -155,8 +149,8 @@ namespace Core.MTCalSync
 					try { var master = await GetAsync(mid); if (master != null) cs.Items.Add(master); }
 					catch (ProviderException ex) when (!ex.IsTransient) { Common.writeToLog("WARN fetch series master " + mid + ": " + ex.Message); }
 				}
-				// Series deletion: a removed occurrence whose master is truly gone → emit a
-				// synthetic deleted master so the mirror recurring event is removed.
+				// A removed occurrence whose master no longer exists means the series was
+				// deleted: emit a deleted master so the mirror series is removed.
 				foreach (var mid in removedMasterIds)
 				{
 					if (masterIds.Contains(mid)) continue;
@@ -169,12 +163,9 @@ namespace Core.MTCalSync
 				foreach (var ev in byId.Values)
 				{
 					var re = ToRemoteEvent(ev);
-					// calendarView/delta expands a recurring series into occurrences, but an
-					// unmodified occurrence comes back LOSSY — empty subject/iCalUId and isAllDay
-					// dropped to false. Mirrored as-is that becomes a "(no title)", non-all-day
-					// event, and the empty uid also defeats iCalUId adoption (duplicating an event
-					// that already exists on the other side). Re-read the full occurrence to
-					// restore a self-consistent subject / all-day / times / uid.
+					// Delta returns unmodified occurrences without subject or iCalUId and with
+					// isAllDay false. Mirrored as-is they become untitled timed events, and the
+					// missing uid defeats iCalUId adoption, so re-read the full occurrence.
 					if (!re.IsDeleted && re.IsRecurringInstance && !string.IsNullOrEmpty(re.Id)
 						&& (string.IsNullOrEmpty(re.ICalUid) || string.IsNullOrEmpty(re.Subject)))
 					{
@@ -188,9 +179,8 @@ namespace Core.MTCalSync
 			return cs;
 		}
 
-		// One page of calendarView/delta, normalized across the default-calendar and
-		// named-calendar request builders (the SDK generates a distinct response type
-		// per path; this adapter keeps the paging loop single-shaped).
+		// One delta page. The SDK returns a distinct response type for default and named
+		// calendars; this keeps the paging loop to one shape.
 		private sealed class DeltaPage
 		{
 			public List<Event> Items { get; } = new();
@@ -198,9 +188,9 @@ namespace Core.MTCalSync
 			public string? NextLink { get; set; }
 		}
 
-		// url == null → initial windowed request; otherwise follow the given
-		// nextLink/deltaLink verbatim. Every page asks for UTC: ParseGraphDate reads times as
-		// UTC, and a link carries the query of the request that minted it but not its headers.
+		// A null url starts a windowed request; otherwise the nextLink/deltaLink is followed
+		// as-is. Every page sends the UTC Prefer header: ParseGraphDate assumes UTC, and a
+		// link keeps its query but not its headers.
 		private async Task<DeltaPage> FetchDeltaPage(string? url, RollingWindow? window)
 		{
 			var page = new DeltaPage();
@@ -210,8 +200,8 @@ namespace Core.MTCalSync
 					? await _graph.Users[_principal].CalendarView.Delta.WithUrl(url).GetAsDeltaGetResponseAsync(rc => rc.Headers.Add("Prefer", "outlook.timezone=\"UTC\""))
 					: await _graph.Users[_principal].CalendarView.Delta.GetAsDeltaGetResponseAsync(rc =>
 					{
-						rc.QueryParameters.StartDateTime = window!.StartUtc.ToString("yyyy-MM-ddTHH:mm:ss");
-						rc.QueryParameters.EndDateTime = window.EndUtc.ToString("yyyy-MM-ddTHH:mm:ss");
+						rc.QueryParameters.StartDateTime = window!.StartUtc.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
+						rc.QueryParameters.EndDateTime = window.EndUtc.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
 						rc.Headers.Add("Prefer", "outlook.timezone=\"UTC\"");
 					});
 				if (r?.Value != null) page.Items.AddRange(r.Value);
@@ -224,8 +214,8 @@ namespace Core.MTCalSync
 					? await _graph.Users[_principal].Calendars[_calId].CalendarView.Delta.WithUrl(url).GetAsDeltaGetResponseAsync(rc => rc.Headers.Add("Prefer", "outlook.timezone=\"UTC\""))
 					: await _graph.Users[_principal].Calendars[_calId].CalendarView.Delta.GetAsDeltaGetResponseAsync(rc =>
 					{
-						rc.QueryParameters.StartDateTime = window!.StartUtc.ToString("yyyy-MM-ddTHH:mm:ss");
-						rc.QueryParameters.EndDateTime = window.EndUtc.ToString("yyyy-MM-ddTHH:mm:ss");
+						rc.QueryParameters.StartDateTime = window!.StartUtc.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
+						rc.QueryParameters.EndDateTime = window.EndUtc.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
 						rc.Headers.Add("Prefer", "outlook.timezone=\"UTC\"");
 					});
 				if (r?.Value != null) page.Items.AddRange(r.Value);
@@ -235,7 +225,7 @@ namespace Core.MTCalSync
 			return page;
 		}
 
-		// ── targeted reads ──────────────────────────────────────────────────
+		// Targeted reads
 		public async Task<RemoteEvent?> GetAsync(string eventId)
 		{
 			try
@@ -257,8 +247,7 @@ namespace Core.MTCalSync
 				$"singleValueExtendedProperties/any(ep: ep/id eq 'String {{{_ns}}} Name {StampKeys.Oid}' and ep/value eq '{Escape(originId)}')";
 			try
 			{
-				// The events LIST endpoint is calendar-scoped (unlike by-id operations),
-				// so a named-calendar connection must search its own calendar.
+				// The events list endpoint is calendar-scoped, unlike by-id operations.
 				List<Event>? found;
 				if (UseDefaultCalendar)
 				{
@@ -295,7 +284,7 @@ namespace Core.MTCalSync
 			var strays = new List<RemoteEvent>();
 			try
 			{
-				// Single page, capped — stray sweeps deal in dozens, not thousands.
+				// One capped page: stray sweeps deal in dozens, not thousands.
 				List<Event>? found;
 				if (UseDefaultCalendar)
 				{
@@ -334,9 +323,8 @@ namespace Core.MTCalSync
 			if (string.IsNullOrEmpty(iCalUid)) return null;
 			try
 			{
-				// We store the clean RFC UID, but Graph filters on the raw GlobalObjectId hex.
-				// Query the value as-is AND the reconstructed GOID, so an external invite
-				// (clean UID on our side, wrapped GOID on Graph's) still matches.
+				// Graph filters on the raw GlobalObjectId hex, but we store the clean RFC UID.
+				// Query both forms so an externally organised invite still matches.
 				var forms = new List<string> { iCalUid };
 				if (GlobalObjectId.TryExtractUid(iCalUid) == null)   // iCalUid is clean, not itself a GOID
 				{
@@ -371,7 +359,7 @@ namespace Core.MTCalSync
 			catch (Exception ex) { ThrowIfTransient(ex, "graph.FindByICalUidAsync"); Common.writeToLog("WARN FindByICalUidAsync (graph): " + ex.Message); return null; }
 		}
 
-		// ── writes ──────────────────────────────────────────────────────────
+		// Writes
 		public async Task<RemoteRef> CreateAsync(ProjectedUnit u, long pairId, long version)
 		{
 			var ev = BuildEvent(u, pairId, version);
@@ -401,11 +389,11 @@ namespace Core.MTCalSync
 		public async Task DeleteAsync(string eventId, string etag)
 		{
 			try { await _graph.Users[_principal].Events[eventId].DeleteAsync(); }
-			catch (ApiException ax) when (ax.ResponseStatusCode == 404) { /* already gone — idempotent */ }
+			catch (ApiException ax) when (ax.ResponseStatusCode == 404) { /* already gone */ }
 			catch (Exception ex) { throw Translate(ex, "graph.delete"); }
 		}
 
-		// ── mapping helpers ─────────────────────────────────────────────────
+		// Mapping helpers
 		private Event BuildEvent(ProjectedUnit u, long pairId, long version)
 		{
 			var ev = new Event
@@ -418,16 +406,16 @@ namespace Core.MTCalSync
 				Location = string.IsNullOrEmpty(u.Location) ? null : new Location { DisplayName = u.Location },
 				Start = ToGraphDateTime(u.StartUtc, u.IsAllDay),
 				End = ToGraphDateTime(u.EndUtc, u.IsAllDay),
-				// SAFETY: never set Attendees on a mirror event.
+				// Never set Attendees on a mirror event.
 				SingleValueExtendedProperties = BuildStampProps(u, pairId, version)
 			};
-			// Series master → translate the RRULE into Graph's PatternedRecurrence.
+			// A series master carries its RRULE as Graph's PatternedRecurrence.
 			if (u.UnitKind == UnitKinds.SeriesMaster && !string.IsNullOrWhiteSpace(u.RecurrenceRule))
 				ev.Recurrence = RecurrenceConverter.RRuleToGraph(u.RecurrenceRule, u.StartUtc, u.TimeZoneId);
 			return ev;
 		}
 
-		// ── series-mode instance overrides ──────────────────────────────────
+		// Series-mode instance overrides
 		public async Task<RemoteRef> UpsertInstanceAsync(string mirrorMasterId, DateTime originalStartUtc, ProjectedUnit u, long pairId, long version)
 		{
 			try
@@ -443,7 +431,7 @@ namespace Core.MTCalSync
 					Sensitivity = u.IsPrivate ? Sensitivity.Private : Sensitivity.Normal,
 					Start = ToGraphDateTime(u.StartUtc, u.IsAllDay),
 					End = ToGraphDateTime(u.EndUtc, u.IsAllDay),
-					SingleValueExtendedProperties = BuildStampProps(u, pairId, version)   // provenance (hygiene/recovery)
+					SingleValueExtendedProperties = BuildStampProps(u, pairId, version)   // provenance stamp
 				};
 				var updated = await _graph.Users[_principal].Events[inst.Id].PatchAsync(patch);
 				return new RemoteRef { Id = inst.Id!, Etag = ReadEtag(updated), ICalUid = updated?.ICalUId ?? string.Empty };
@@ -468,8 +456,8 @@ namespace Core.MTCalSync
 		{
 			var resp = await _graph.Users[_principal].Events[masterId].Instances.GetAsync(rc =>
 			{
-				rc.QueryParameters.StartDateTime = originalStartUtc.AddDays(-1).ToString("yyyy-MM-ddTHH:mm:ss");
-				rc.QueryParameters.EndDateTime = originalStartUtc.AddDays(1).ToString("yyyy-MM-ddTHH:mm:ss");
+				rc.QueryParameters.StartDateTime = originalStartUtc.AddDays(-1).ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
+				rc.QueryParameters.EndDateTime = originalStartUtc.AddDays(1).ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
 				rc.Headers.Add("Prefer", "outlook.timezone=\"UTC\"");
 			});
 			return resp?.Value?.FirstOrDefault(o =>
@@ -490,15 +478,13 @@ namespace Core.MTCalSync
 
 		private static DateTimeTimeZone ToGraphDateTime(DateTime utc, bool allDay)
 		{
-			string s = allDay ? utc.ToString("yyyy-MM-ddT00:00:00") : utc.ToString("yyyy-MM-ddTHH:mm:ss");
+			string s = allDay ? utc.ToString("yyyy-MM-ddT00:00:00", CultureInfo.InvariantCulture) : utc.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture);
 			return new DateTimeTimeZone { DateTime = s, TimeZone = "UTC" };
 		}
 
-		// NOTE: inside $expand=...($filter=...) each extended property is addressed
-		// DIRECTLY (`id eq ...`) — the `ep/` lambda alias belongs only to the list
-		// endpoint's `any(ep: ...)` filter form (see FindByStampAsync). Mixing them
-		// up makes Graph 400 with "Could not find a property named 'ep'"; it stayed
-		// latent because only targeted reads (teardown, stamp adoption) expand stamps.
+		// Inside $expand=...($filter=...) a property is addressed directly (`id eq ...`).
+		// The `ep/` alias belongs only to the list endpoint's `any(ep: ...)` form (see
+		// FindByStampAsync); using it here makes Graph return 400.
 		private string StampExpand() =>
 			"singleValueExtendedProperties($filter=" +
 			string.Join(" or ", StampKeys.All.Select(k => $"id eq 'String {{{_ns}}} Name {k}'")) + ")";
@@ -531,8 +517,8 @@ namespace Core.MTCalSync
 			{
 				Provider = Providers.M365,
 				Id = e.Id ?? string.Empty,
-				// Graph gives externally-organised invites as a GlobalObjectId that wraps the
-				// real RFC UID; unwrap it so it matches the clean UID Google exposes.
+				// Graph wraps an external invite's RFC UID in a GlobalObjectId; unwrap it
+				// to match the clean UID Google exposes.
 				ICalUid = GlobalObjectId.Normalize(e.ICalUId),
 				Etag = ReadEtag(e),
 				IsDeleted = removed || (e.IsCancelled ?? false),
@@ -543,7 +529,7 @@ namespace Core.MTCalSync
 				ShowAs = MapShowAsFromGraph(e.ShowAs),
 				IsPrivate = e.Sensitivity == Sensitivity.Private || e.Sensitivity == Sensitivity.Confidential,
 				SeriesMasterId = e.SeriesMasterId,
-				RecurrenceRule = null,   // set by the series-mode read path
+				RecurrenceRule = null,   // set below for series masters
 				TimeZoneId = "UTC"
 			};
 			re.StartUtc = ParseGraphDate(e.Start);
@@ -596,10 +582,9 @@ namespace Core.MTCalSync
 
 		private static string Escape(string s) => (s ?? string.Empty).Replace("'", "''");
 
-		// The lookups behind match-before-create treat a failure as "not found". That is safe
-		// only for a permanent refusal: after a throttle or an outage, "not found" plans a
-		// create and duplicates an event that exists. So those, and a dead grant, end the run
-		// instead, and the next run looks again.
+		// Match-before-create lookups treat a failure as "not found", which is safe only for
+		// a permanent refusal. A throttle, outage or dead grant would plan a duplicate
+		// create, so those end the run and the next run looks again.
 		private static void ThrowIfTransient(Exception ex, string op)
 		{
 			var pe = Translate(ex, op);
@@ -612,7 +597,7 @@ namespace Core.MTCalSync
 			if (ex is ApiException ax)
 			{
 				int code = ax.ResponseStatusCode;
-				bool transient = code == 429 || code == 503 || code == 504 || (code >= 500 && code < 600);
+				bool transient = code == 429 || (code >= 500 && code < 600);
 				int? retryAfter = null;
 				if (ax.ResponseHeaders != null && ax.ResponseHeaders.TryGetValue("Retry-After", out var vals))
 				{

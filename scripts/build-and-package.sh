@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# build-and-package.sh — publish the MT-CalSync engine (worker + self-host portal) for
+# build-and-package.sh: publish the MT-CalSync engine (worker + self-host portal) for
 # linux-x64 and bundle the schema + deploy assets into a tarball.
 #
 # Run from anywhere:  ./scripts/build-and-package.sh [--self-contained]

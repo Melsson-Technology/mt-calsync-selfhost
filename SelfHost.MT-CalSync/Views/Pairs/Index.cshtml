@@ -22,8 +22,8 @@
     }
     else
     {
-        @* overflow guard: long auto-names + the actions cell must scroll inside the
-           card rather than punch through its right edge *@
+        @* Long pair names and the actions cell scroll inside the card instead of
+           overflowing its edge. *@
         <div style="overflow-x:auto">
         <table>
             <thead><tr><th>Name</th><th>Microsoft</th><th>Google</th><th>Mode</th><th>Maps</th><th>Issues</th><th></th></tr></thead>
@@ -44,8 +44,7 @@
                             <input type="hidden" name="enabled" value="@((!p.Enabled).ToString().ToLower())" />
                             <button class="btn btn-sm" type="submit">@(p.Enabled ? "Pause" : "Resume")</button>
                         </form>
-                        @* States what teardown does, nothing more: it deletes the events that
-                           carry this pair's provenance stamp. *@
+                        @* Teardown deletes only the events that carry this pair's stamp. *@
                         <form asp-action="Remove" method="post" style="margin:0 0 0 6px;display:inline-block"
                               onsubmit="return confirm('Remove this pair? The mirror events it created are deleted.');">
                             @Html.AntiForgeryToken()

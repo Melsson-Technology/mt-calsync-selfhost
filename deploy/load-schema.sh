@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# load-schema.sh — apply the MT-CalSync engine schema (Core.MT-CalSync/Sql/NNN_*.sql,
-# bundled into worker-publish/sql/ by build-and-package.ps1) in numeric order.
+# load-schema.sh: apply the engine schema (Core.MT-CalSync/Sql/NNN_*.sql, bundled into
+# worker-publish/sql/ by build-and-package) in numeric order.
 #
 # Run on the server as root (local MySQL root socket auth):
 #   sudo bash /opt/mtcalsync/deploy/load-schema.sh [db-name] [sql-dir]
@@ -9,9 +9,8 @@
 #   db-name  defaults to "mtcalsync"
 #   sql-dir  defaults to "/opt/mtcalsync/worker-publish/sql"
 #
-# NOTE: every table is CREATE TABLE IF NOT EXISTS, so re-running this is a harmless
-# no-op. For the same reason it never changes a table that already exists, and there is
-# no migration tracking: apply later schema changes by hand.
+# Every table is CREATE TABLE IF NOT EXISTS, so re-running is a no-op and never changes an
+# existing table. There is no migration tracking: apply later schema changes by hand.
 
 set -euo pipefail
 

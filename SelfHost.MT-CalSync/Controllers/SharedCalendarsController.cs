@@ -5,16 +5,14 @@ using SelfHost.MTCalSync.Models;
 
 namespace SelfHost.MTCalSync.Controllers
 {
-	// /SharedCalendars — discover the shared Google calendars visible to the configured
-	// Google account and toggle each one's one-way mirror into the M365 primary calendar.
-	// Checking a box creates a google→m365 pair; unchecking removes it (and its mirrored
-	// events). Operator-only: it drives the global-credential (app_default) connections.
+	// /SharedCalendars: toggle a one-way mirror of each shared Google calendar into the M365
+	// primary calendar. Checking creates a google-to-m365 pair; unchecking removes it and its
+	// mirrored events. Operator-only: it uses the app-credential (app_default) connections.
 	[Authorize(Roles = "Admin")]
 	public class SharedCalendarsController : Controller
 	{
-		// The mirrors this page creates are app-credential pairs (EnableSharedCalendarMirror
-		// makes app_default connections), so without the service account and the app
-		// registration every one of them fails on its first sync. Say so up front instead.
+		// These mirrors use app_default connections, so without the service account and the
+		// app registration every one fails on its first sync. Say so up front.
 		private const string AppOnlyMissing =
 			"Shared calendars mirrors through the app-only credentials: a Google service account with " +
 			"domain-wide delegation and a Microsoft app registration. Add both under Settings to use this page " +
@@ -90,7 +88,7 @@ namespace SelfHost.MTCalSync.Controllers
 			return RedirectToAction("Index");
 		}
 
-		// Resolve the destination M365 mailbox + the Google account to enumerate. Prefer the
+		// Resolve the destination M365 mailbox and the Google account to enumerate. Prefer the
 		// main bidirectional pair's connections; fall back to any configured connections.
 		private static (string m365Email, ProviderConnection? googleConn, string? error) Resolve()
 		{

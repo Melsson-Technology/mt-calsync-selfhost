@@ -17,9 +17,8 @@ namespace SelfHost.MTCalSync.Controllers
 			var rows = new List<PairRow>();
 			var em = new EventMapping();
 			var dl = new DeadLetter();
-			// All pairs, not the user's: a self-host install has exactly one operator, and
-			// pairs from the operator form, `add-pair` and Shared calendars carry no user,
-			// so a per-user list hid them and showed the setup guide over running pairs.
+			// All pairs, not the user's: there is one operator, and pairs from the operator
+			// form, `add-pair` and Shared calendars carry no user.
 			foreach (var p in new SyncPair().listAll())
 			{
 				var l = new ProviderConnection().getById(p.leftConnectionID);
@@ -31,7 +30,6 @@ namespace SelfHost.MTCalSync.Controllers
 					PairID = p.pairID, Name = p.name, Direction = p.direction, Fidelity = p.fidelityMode,
 					Recurrence = p.recurrenceMode, Enabled = p.enabled,
 					M365Email = l.principalEmail, GoogleEmail = r.principalEmail,
-					M365Token = last != null, GoogleToken = last != null,
 					LastSuccess = last == null ? "never"
 						: $"{last.status} · {(last.finishedAt ?? last.startedAt):MM-dd HH:mm}Z",
 					Mappings = em.countActive(p.pairID),

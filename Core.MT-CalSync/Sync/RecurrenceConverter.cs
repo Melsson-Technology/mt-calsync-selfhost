@@ -3,18 +3,14 @@ using MSDate = Microsoft.Kiota.Abstractions.Date;
 
 namespace Core.MTCalSync
 {
-	// Bidirectional translation between Microsoft Graph's structured
-	// PatternedRecurrence and an RFC 5545 RRULE string (the value Google Calendar
-	// carries in event.Recurrence, minus the "RRULE:" prefix).
-	//
-	// This is the centerpiece of series-preserving sync and the deepest bug
-	// surface in calendar interop. It is pure logic, so round-trip tests cover it.
-	// Unsupported/exotic patterns return null; callers fall back gracefully.
+	// Translates between Graph's PatternedRecurrence and an RFC 5545 RRULE string (Google's
+	// event.Recurrence value without the "RRULE:" prefix). Series mode depends on it, and
+	// round-trip tests cover it. Unsupported patterns return null for the caller to handle.
 	public static class RecurrenceConverter
 	{
 		private static readonly string[] RRuleDays = { "SU", "MO", "TU", "WE", "TH", "FR", "SA" };
 
-		// ── Graph → RRULE ────────────────────────────────────────────────────
+		// Graph to RRULE
 		public static string? GraphToRRule(PatternedRecurrence? r)
 		{
 			if (r?.Pattern?.Type == null || r.Range == null) return null;
@@ -66,7 +62,7 @@ namespace Core.MTCalSync
 					return null;
 			}
 
-			// Range → COUNT / UNTIL.
+			// Range to COUNT or UNTIL.
 			if (r.Range.Type == RecurrenceRangeType.Numbered && r.Range.NumberOfOccurrences.GetValueOrDefault() > 0)
 				parts.Add($"COUNT={r.Range.NumberOfOccurrences!.Value}");
 			else if (r.Range.Type == RecurrenceRangeType.EndDate && r.Range.EndDate != null)
@@ -92,7 +88,7 @@ namespace Core.MTCalSync
 			}
 		}
 
-		// ── RRULE → Graph ────────────────────────────────────────────────────
+		// RRULE to Graph
 		public static PatternedRecurrence? RRuleToGraph(string? rrule, DateTime seriesStartUtc, string ianaTz)
 		{
 			if (string.IsNullOrWhiteSpace(rrule)) return null;
@@ -193,7 +189,7 @@ namespace Core.MTCalSync
 			pattern.Index = OrdinalToIndex(ordinal);
 		}
 
-		// ── helpers ──────────────────────────────────────────────────────────
+		// Helpers
 		private static string DayToken(DayOfWeekObject d) => d switch
 		{
 			DayOfWeekObject.Sunday => "SU",
@@ -268,7 +264,7 @@ namespace Core.MTCalSync
 			return DateTime.TryParse(until, out dt);
 		}
 
-		// Graph's RecurrenceTimeZone historically wants a Windows tz name.
+		// Graph's RecurrenceTimeZone takes a Windows time zone name.
 		private static string IanaToWindows(string iana)
 		{
 			if (string.IsNullOrWhiteSpace(iana) || iana == "UTC") return "UTC";

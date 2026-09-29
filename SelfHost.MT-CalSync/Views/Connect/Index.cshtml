@@ -17,8 +17,8 @@
     </p>
     @if (!googleConfigured || !msConfigured)
     {
-        @* A self-hoster registers their own OAuth apps, so "not available yet" left them
-           with nothing to do. Say what's missing and where it goes. *@
+        @* The operator registers their own OAuth apps, so say what's missing and where
+           it goes. *@
         string missing = !googleConfigured && !msConfigured ? "Google and Microsoft" : (!googleConfigured ? "Google" : "Microsoft");
         <p class="muted">
             To connect @missing accounts, add your @missing OAuth client@(!googleConfigured && !msConfigured ? "s" : "")

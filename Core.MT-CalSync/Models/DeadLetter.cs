@@ -2,9 +2,9 @@ using System.Data;
 
 namespace Core.MTCalSync
 {
-	// Items that fail permanently or repeatedly. The UNIQUE(pairID, sourceProvider,
-	// sourceEventKey, operation) makes a re-failing item bump attemptCount; open rows
-	// are skipped by the engine so one poison event can't fail the whole pair.
+	// Items that fail permanently or repeatedly. The unique key (pairID, sourceProvider,
+	// sourceEventKey, operation) makes a repeat failure bump attemptCount. The engine skips
+	// open rows so one poison event can't fail the whole pair.
 	public class DeadLetter : @base
 	{
 		public long deadLetterID { get; set; }
@@ -76,7 +76,7 @@ namespace Core.MTCalSync
 			return list;
 		}
 
-		// Resolve one (id>0) or all open rows for a pair. Returns rows affected.
+		// Resolves one row (id > 0) or all open rows for a pair. Returns rows affected.
 		public long resolve(long pair, long id = 0)
 		{
 			var oDA = new DataAccess();

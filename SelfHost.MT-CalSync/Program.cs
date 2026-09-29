@@ -11,13 +11,12 @@ builder.WebHost.ConfigureKestrel(o => o.AddServerHeader = false);
 
 builder.Services.AddControllersWithViews();
 
-// The antiforgery cookie defaults to no Secure flag even over HTTPS. SameAsRequest marks
-// it Secure behind TLS (the proxy's forwarded proto counts) and still works over plain
-// HTTP on an SSH tunnel, matching the auth cookie below.
+// The antiforgery cookie has no Secure flag by default. SameAsRequest sets it behind TLS
+// (including the proxy's forwarded proto) and still works over plain HTTP on an SSH tunnel.
 builder.Services.AddAntiforgery(o => o.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest);
 
-// DataProtection keys must survive deploys (the publish dir is swapped atomically)
-// or every cookie and pending OAuth state dies on each ship.
+// DataProtection keys live outside the publish dir, which each deploy replaces; otherwise
+// every deploy invalidates cookies and pending OAuth state.
 builder.Services.AddDataProtection()
 	.PersistKeysToFileSystem(new DirectoryInfo(Settings.DataProtectionKeysPath))
 	.SetApplicationName("MTCalSyncSelfHost");
@@ -34,11 +33,9 @@ builder.Services
 		options.SlidingExpiration = true;
 		options.Cookie.Name = "MTCalSync.SelfHost";
 		options.Cookie.HttpOnly = true;
-		// Lax, not Strict: the OAuth consent return chain is cross-site-initiated, and
-		// Strict withholds the cookie on the callback AND every redirect hop after it.
-		// Lax attaches it on top-level GET navigations (the OAuth return path) while
-		// still withholding it on cross-site POSTs; state-changing endpoints validate
-		// an antiforgery token too. SameAsRequest keeps it working over an SSH tunnel.
+		// Lax, not Strict: the OAuth return chain is cross-site, and Strict withholds the
+		// cookie on the callback and every redirect after it. Lax still withholds it on
+		// cross-site POSTs, and state-changing endpoints also validate an antiforgery token.
 		options.Cookie.SameSite = SameSiteMode.Lax;
 		options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
 	});
@@ -72,10 +69,9 @@ app.UseForwardedHeaders(new ForwardedHeadersOptions
 if (!app.Environment.IsDevelopment())
 {
 	app.UseExceptionHandler("/Home/Error");
-	// HSTS only reaches browsers over HTTPS (and never for localhost), so a tunnel or a
-	// plain-HTTP test install is unaffected. The framework's 30 days rather than a year:
-	// a self-hoster may later move the portal behind a tunnel or change hostnames, and
-	// a long pin would lock their own browser out of plain HTTP in the meantime.
+	// HSTS applies only over HTTPS and never to localhost, so tunnels are unaffected. The
+	// default 30 days, not a year, so a later hostname or tunnel change doesn't lock the
+	// operator's browser out of plain HTTP.
 	app.UseHsts();
 }
 
@@ -85,11 +81,11 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 
-// Single-tenant: "/" is the operator dashboard (redirects to /Auth/Login when signed out).
+// "/" is the operator dashboard (redirects to /Auth/Login when signed out).
 app.MapControllerRoute(name: "default", pattern: "{controller=Dashboard}/{action=Index}/{id?}");
 
-// Anonymous liveness probe for external uptime checks: proves Kestrel is up and the
-// database answers. No details leak — just ok/degraded.
+// Anonymous liveness probe: Kestrel is up and the database answers. Returns only
+// ok or degraded.
 app.MapGet("/healthz", () =>
 {
 	var da = new DataAccess();

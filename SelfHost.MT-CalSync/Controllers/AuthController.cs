@@ -7,9 +7,8 @@ using Microsoft.AspNetCore.RateLimiting;
 
 namespace SelfHost.MTCalSync.Controllers
 {
-	// Single-operator login for the self-host portal. One password, stored hashed in
-	// the settings table (set with the `set-admin-password` worker command). No user
-	// table, no signup, no reset flow — a self-host operator manages their own box.
+	// Single-operator login: one password, stored hashed in the settings table and set with
+	// the `set-admin-password` worker command. There is no user table and no reset flow.
 	[AllowAnonymous]
 	public class AuthController : Controller
 	{
@@ -34,7 +33,7 @@ namespace SelfHost.MTCalSync.Controllers
 			}
 			if (string.IsNullOrEmpty(password) || !PasswordHasher.Verify(password, hash))
 			{
-				await Task.Delay(Random.Shared.Next(120, 400));   // blunt timing / brute-force
+				await Task.Delay(Random.Shared.Next(120, 400));   // blunts timing and brute-force attempts
 				ViewBag.Error = "Incorrect password.";
 				return View();
 			}

@@ -1,8 +1,8 @@
 namespace Core.MTCalSync
 {
-	// Lease-based per-pair advisory lock (compare-and-set). Used instead of MySQL
-	// GET_LOCK() because DataAccess opens a fresh connection per call, so a
-	// session-scoped lock can't span a multi-second run. Crash-safe via lease expiry.
+	// Per-pair lease lock, taken by compare-and-set. MySQL GET_LOCK() is session-scoped and
+	// DataAccess opens a connection per call, so it can't span a run. A crashed run's
+	// lock frees when its lease expires.
 	public class SyncLock
 	{
 		private readonly long _pairID;
@@ -11,23 +11,22 @@ namespace Core.MTCalSync
 		public SyncLock(long pairID)
 		{
 			_pairID = pairID;
-			// host:pid:guid — unique per run so release only clears our own lease.
+			// host:pid:guid, unique per run, so release only clears our own lease.
 			string owner = $"{Environment.MachineName}:{Environment.ProcessId}:{Guid.NewGuid():N}";
 			_owner = owner.Length > 120 ? owner.Substring(0, 120) : owner;
 		}
 
 		public string Owner => _owner;
 
-		// Try to acquire. Returns true iff we won the lease. leaseSeconds should
-		// comfortably exceed the max run time (a crashed run's lock frees after it).
+		// Returns true if we won the lease. leaseSeconds should comfortably exceed the
+		// longest run, since a live run's lease must not expire under it.
 		public bool tryAcquire(int leaseSeconds = 600)
 		{
 			var oDA = new DataAccess();
-			// Ensure the row exists (no-op if present).
+			// Make sure the row exists.
 			oDA.insertData("insert ignore into sync_lock (pairID) values (@p)",
 				new Dictionary<string, object> { { "@p", _pairID } });
-			// CAS: claim only if free or lease expired. leaseSeconds is a code constant
-			// (not user input), so inlining it into the INTERVAL is safe.
+			// Claim only if free or expired. secs is an int, so inlining it into INTERVAL is safe.
 			int secs = Math.Max(30, leaseSeconds);
 			string sql =
 				"update sync_lock set lockedBy=@me, lockedAt=NOW(), leaseExpiresAt=NOW() + INTERVAL " + secs + " SECOND " +

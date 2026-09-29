@@ -3,18 +3,16 @@ using System.Text.Json;
 
 namespace Core.MTCalSync
 {
-	// Microsoft identity platform (v2) authorization-code + refresh-token flow,
-	// spoken directly over HTTP. Deliberately not MSAL: its serialized token cache
-	// doesn't fit the one-encrypted-column-per-account model, and the two POSTs we
-	// need are stable, documented endpoints. The multitenant app authorizes against
-	// /organizations; refresh MUST target the account's home tenant (captured from
-	// the id_token at connect) — refreshing against `common` fails for guests.
+	// Microsoft identity platform v2 authorization-code and refresh flow over plain HTTP.
+	// Not MSAL: its token cache doesn't fit one encrypted column per account, and the two
+	// POSTs are stable, documented endpoints. Authorize uses /organizations; refresh must
+	// target the account's home tenant (from the id_token), since `common` fails for guests.
 	public static class MsOAuthFlow
 	{
 		private static readonly HttpClient _http = new();
 
-		// Delegated scopes. Reserved OIDC scopes ride alongside the fully-qualified
-		// Graph resource scopes; offline_access is what yields the refresh token.
+		// Delegated scopes: OIDC scopes plus fully qualified Graph scopes.
+		// offline_access yields the refresh token.
 		public const string Scopes =
 			"openid profile email offline_access " +
 			"https://graph.microsoft.com/Calendars.ReadWrite " +
@@ -88,7 +86,7 @@ namespace Core.MTCalSync
 				{
 					result.Error = err.GetString() ?? "unknown";
 					result.ErrorDescription = root.TryGetProperty("error_description", out var ed) ? (ed.GetString() ?? "") : "";
-					// Never log tokens; the error description is safe and diagnostic.
+					// Never log tokens; the error description is safe to log.
 					Common.writeToLog($"MS token endpoint error ({result.Error}): {Truncate(result.ErrorDescription, 300)}");
 					return result;
 				}
@@ -106,12 +104,12 @@ namespace Core.MTCalSync
 			return result;
 		}
 
-		// Claims we need from the id_token. The token arrived directly from the
-		// token endpoint over TLS, so decoding without signature validation is fine.
+		// Claims read from the id_token. It comes straight from the token endpoint over
+		// TLS, so decoding without signature validation is acceptable.
 		public class IdClaims
 		{
-			public string ObjectId { get; set; } = string.Empty;      // oid — immutable account id
-			public string TenantId { get; set; } = string.Empty;      // tid — home tenant
+			public string ObjectId { get; set; } = string.Empty;      // oid: immutable account id
+			public string TenantId { get; set; } = string.Empty;      // tid: home tenant
 			public string Email { get; set; } = string.Empty;
 			public string Name { get; set; } = string.Empty;
 		}

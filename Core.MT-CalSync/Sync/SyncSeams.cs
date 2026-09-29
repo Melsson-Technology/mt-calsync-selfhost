@@ -1,18 +1,12 @@
 namespace Core.MTCalSync
 {
-	// ── Extension seams: where the engine defers subscription/identity policy ────
-	//
-	// The sync engine is self-contained and runs standalone (self-host). Two
-	// behaviors are NOT the engine's to decide, so each is expressed as an interface
-	// with a permissive default that a hosting layer can replace at startup
-	// (installed by the hosting layer at startup): (1) whether a customer may sync now,
-	// and (2) how the owner of a pair/account is told about a dead grant or a pair
-	// that keeps failing.
-	//
-	// Defaults = self-host: always eligible, and notifications go to the operator
-	// alert address as plain SMTP — no user table, no templates, no dedupe ledger.
+	// Extension seams. Two decisions sit outside the engine: whether an owner's pairs may
+	// sync now, and how an owner hears about a dead grant or a pair that keeps failing.
+	// Each is an interface with a permissive default that hosts embedding the engine can
+	// replace at startup. The defaults allow every pair and send plain SMTP alerts to the
+	// operator.
 
-	// "Is this customer allowed to sync right now?" Default: always yes.
+	// Whether this owner's pairs may sync now. The default always allows.
 	public interface ISyncGate
 	{
 		bool CanSync(long customerId);
@@ -25,27 +19,26 @@ namespace Core.MTCalSync
 
 	public static class SyncGate
 	{
-		// Replaced by the hosting layer at startup. Defaults to allow-all
-		// so a standalone engine never gates on a subscription it doesn't have.
+		// Hosts that embed the engine can replace this at startup.
 		public static ISyncGate Current { get; set; } = new AllowAllSyncGate();
 	}
 
-	// How the owner of a pair/account is notified. The engine decides WHEN (the 24h
-	// reauth dedupe, the consecutive-failure threshold + per-pair throttle); the
-	// implementation decides WHO (which recipient) and HOW (plain alert vs template).
+	// How a pair's or account's owner is notified. The engine decides when (the 24h reauth
+	// dedupe, the failure threshold and per-pair throttle); the implementation decides who
+	// receives it and how.
 	public interface IOwnerNotifier
 	{
-		// A grant died (revoked/expired). Return true iff a notification was actually
-		// issued, so the engine stamps its 24h dedupe only when one fired.
+		// A grant was revoked or expired. Returns true only if a notification went out, so the
+		// engine stamps its 24h dedupe only then.
 		bool ReauthNeeded(OAuthAccount account, string provider);
 
-		// A pair has failed persistently. The engine has already applied the
-		// >=3-consecutive-failure threshold and claimed the per-pair 24h throttle.
+		// A pair keeps failing. The engine has already applied the 3-failure threshold and
+		// claimed the per-pair 24h throttle.
 		void PersistentFailure(SyncPair pair, SyncRun run);
 	}
 
-	// Default notifier for self-host: a plain operator alert (to Settings.AlertTo).
-	// The self-host operator IS the owner and just needs to know something needs a hand.
+	// The default notifier: a plain alert to Settings.AlertTo, since on a standalone install
+	// the operator is the owner.
 	public sealed class SmtpOwnerNotifier : IOwnerNotifier
 	{
 		public bool ReauthNeeded(OAuthAccount account, string provider)
@@ -70,7 +63,7 @@ namespace Core.MTCalSync
 
 	public static class OwnerNotifier
 	{
-		// Replaced by the hosting layer at startup. Defaults to operator SMTP.
+		// Hosts that embed the engine can replace this at startup.
 		public static IOwnerNotifier Current { get; set; } = new SmtpOwnerNotifier();
 	}
 }

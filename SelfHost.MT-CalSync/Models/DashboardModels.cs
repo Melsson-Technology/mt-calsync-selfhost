@@ -2,9 +2,8 @@ using Core.MTCalSync;
 
 namespace SelfHost.MTCalSync.Models
 {
-	// The signed-in customer's Dashboard: onboarding progress + the accounts/pairs
-	// cards. All the onboarding flags are cheap (no live provider calls) so the
-	// "Get started" guide can render from a single controller pass.
+	// The Dashboard: setup progress plus the accounts and pairs cards. The flags make no
+	// live provider calls, so the page renders in one controller pass.
 	public class DashboardViewModel
 	{
 		public bool IsAdmin { get; set; }
@@ -19,10 +18,8 @@ namespace SelfHost.MTCalSync.Models
 		public List<OAuthAccount> ReauthAccounts => Accounts.Where(a => !a.isConnected).ToList();
 		public bool BothProvidersConnected => GoogleConnected && MicrosoftConnected;
 
-		// First-run artifact: shown only while there is no pair yet. A pair can't exist
-		// unless both providers were connected at create time, so !HasPairs is a robust
-		// "setup incomplete" proxy — and the guide never resurrects on a later
-		// needs_reauth (the reconnect banner covers that).
+		// Shown only while there is no pair. A later needs_reauth doesn't bring the guide
+		// back; the reconnect banner covers that.
 		public bool ShowSetupGuide => !HasPairs;
 	}
 
@@ -55,6 +52,6 @@ namespace SelfHost.MTCalSync.Models
 		public List<PairRow> Pairs { get; set; } = new();
 		public List<string>? TestReport { get; set; }
 		public bool? TestOk { get; set; }
-		public int TestCalendars { get; set; }            // calendars the last test actually read
+		public int TestCalendars { get; set; }            // calendars the last test read
 	}
 }

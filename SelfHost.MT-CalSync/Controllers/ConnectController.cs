@@ -8,13 +8,9 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace SelfHost.MTCalSync.Controllers
 {
-	// Account connections: start the OAuth consent flow, receive the callback,
-	// list connected accounts, disconnect. Callbacks stay [AllowAnonymous] and
-	// re-establish the user from the DataProtection-encrypted state blob (which
-	// also carries the PKCE verifier, so no server session is needed) — they never
-	// rely on the session cookie, so they work whether or not the browser attached
-	// it (auth cookie is SameSite=Lax; Program.cs explains why Strict broke the
-	// post-consent redirect chain).
+	// Account connections: OAuth consent, callback, list and disconnect. Callbacks are
+	// [AllowAnonymous] and take the user from the encrypted state blob, which also carries
+	// the PKCE verifier, so they work whether or not the browser sends the auth cookie.
 	public class ConnectController : Controller
 	{
 		private const int StateLifetimeMinutes = 15;
@@ -25,7 +21,7 @@ namespace SelfHost.MTCalSync.Controllers
 			_stateProtector = dataProtection.CreateProtector("MTCalSync.OAuthState");
 		}
 
-		// ── connected-accounts page ───────────────────────────────────────────
+		// Connected-accounts page
 		[HttpGet]
 		public IActionResult Index()
 		{
@@ -37,8 +33,8 @@ namespace SelfHost.MTCalSync.Controllers
 			return View();
 		}
 
-		// Live calendar list for one connected account — the picker's data source
-		// and a handy "is this connection actually working?" probe.
+		// Live calendar list for one account: the picker's data source, and a check that
+		// the connection works.
 		[HttpGet]
 		public async Task<IActionResult> Calendars(long accountId)
 		{
@@ -73,7 +69,7 @@ namespace SelfHost.MTCalSync.Controllers
 			return View();
 		}
 
-		// ── start consent ─────────────────────────────────────────────────────
+		// Start consent
 		[HttpGet]
 		public IActionResult Start(string provider, string? returnTo = null)
 		{
@@ -108,7 +104,7 @@ namespace SelfHost.MTCalSync.Controllers
 			return Redirect(url);
 		}
 
-		// ── callbacks (anonymous — see class comment) ─────────────────────────
+		// Callbacks (anonymous; see the class comment)
 		[AllowAnonymous]
 		[HttpGet("oauth/google/callback")]
 		public async Task<IActionResult> GoogleCallback(string? code, string? state, string? error)
@@ -153,7 +149,7 @@ namespace SelfHost.MTCalSync.Controllers
 				tokens.RefreshToken, tokens.AccessToken, tokens.ExpiresInSeconds);
 		}
 
-		// ── disconnect ────────────────────────────────────────────────────────
+		// Disconnect
 		[HttpPost]
 		[ValidateAntiForgeryToken]
 		public async Task<IActionResult> Disconnect(long accountId)
@@ -162,8 +158,7 @@ namespace SelfHost.MTCalSync.Controllers
 			var account = new OAuthAccount().getById(accountId);
 			if (account.oauthAccountID == 0 || account.userID != userId) return NotFound();
 
-			// Connections still referenced by pairs block the disconnect — removing
-			// the pairs first is what cleans their mirrored events up properly.
+			// Pairs block the disconnect: removing a pair is what cleans up its mirrored events.
 			var connections = new ProviderConnection().listByOAuthAccount(accountId);
 			var pc = new ProviderConnection();
 			if (connections.Any(c => pc.countReferencingPairs(c.connectionID) > 0))
@@ -174,9 +169,9 @@ namespace SelfHost.MTCalSync.Controllers
 
 			if (account.provider == Providers.Google)
 				await GoogleOAuthFlow.RevokeAsync(account.decryptRefreshToken());
-			// Microsoft has no per-app revoke endpoint: deleting our stored tokens ends
-			// access (the surviving access token dies within the hour). Users can also
-			// revoke it themselves at myapps.microsoft.com.
+			// Microsoft has no per-app revoke endpoint: deleting the stored tokens ends access
+			// once the current access token expires (within the hour). Users can also revoke
+			// at myapps.microsoft.com.
 
 			foreach (var conn in connections) pc.delete(conn.connectionID);
 			account.delete(accountId);
@@ -185,7 +180,7 @@ namespace SelfHost.MTCalSync.Controllers
 			return RedirectToAction("Index");
 		}
 
-		// ── helpers ───────────────────────────────────────────────────────────
+		// Helpers
 		private sealed class StatePayload
 		{
 			public long u { get; set; }      // userID
@@ -193,8 +188,7 @@ namespace SelfHost.MTCalSync.Controllers
 			public string p { get; set; } = string.Empty;   // provider
 			public string v { get; set; } = string.Empty;   // PKCE code verifier
 			public long t { get; set; }      // issued at (ticks UTC)
-			public string r { get; set; } = string.Empty;   // returnTo (local path; carried so the
-															 // onboarding guide gets the user back)
+			public string r { get; set; } = string.Empty;   // returnTo (local path only)
 		}
 
 		private StatePayload? ValidateState(string? state, string expectedProvider)
@@ -236,8 +230,7 @@ namespace SelfHost.MTCalSync.Controllers
 
 			Common.writeToLog($"OAuth account {(existing.oauthAccountID > 0 ? "reconnected" : "connected")}: {provider} {email} (user {payload.u})");
 			TempData["Info"] = $"{(provider == Providers.Google ? "Google" : "Microsoft")} account {email} connected.";
-			// Return to where the flow started (the onboarding guide passes /Dashboard);
-			// re-validate local-only since the value round-tripped through the client.
+			// Return to where the flow started. Re-check it is local: it came back via the client.
 			if (!string.IsNullOrEmpty(payload.r) && Url.IsLocalUrl(payload.r))
 				return LocalRedirect(payload.r);
 			return RedirectToAction("Index");
@@ -252,7 +245,7 @@ namespace SelfHost.MTCalSync.Controllers
 		private static string FriendlyProviderError(string? error, string? description = null)
 		{
 			if (error == "access_denied") return "You cancelled the connection. Nothing was changed.";
-			// Tenant-admin consent blocks (Entra) deserve a specific explanation.
+			// Entra admin-consent blocks get a specific explanation.
 			if ((description ?? string.Empty).Contains("AADSTS65001") || (description ?? string.Empty).Contains("AADSTS650052") ||
 				(description ?? string.Empty).Contains("AADSTS90094"))
 				return "Your organization requires admin approval for new apps, and this app hasn't been approved yet. Ask your Microsoft 365 admin, or connect a personal/work account from a tenant that allows user consent.";

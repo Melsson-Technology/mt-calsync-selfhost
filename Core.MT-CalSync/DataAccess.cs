@@ -4,10 +4,9 @@ using System.Globalization;
 
 namespace Core.MTCalSync
 {
-	// Hand-rolled ADO.NET data access. Opens/closes a fresh connection per call —
-	// deliberately stateless. NOTE: because the connection is per-call, MySQL
-	// session-scoped GET_LOCK() is NOT usable for cross-call locking; MT-CalSync
-	// uses a lease row in `sync_lock` instead (see SyncLock.cs).
+	// Plain ADO.NET data access that opens a fresh connection per call. Session state
+	// doesn't survive between calls, so GET_LOCK() can't be used; SyncLock uses a lease
+	// row in `sync_lock` instead.
 	public class DataAccess
 	{
 		string dbConnString = Settings.MySqlDatabaseConnection;
@@ -79,8 +78,8 @@ namespace Core.MTCalSync
 			return outVal;
 		}
 
-		// Parameterized INSERT — returns the auto-increment id via LAST_INSERT_ID().
-		// Accepts INSERT / INSERT IGNORE / ... ON DUPLICATE KEY UPDATE statements.
+		// Runs an INSERT, INSERT IGNORE or upsert and returns LAST_INSERT_ID(). An upsert
+		// that updates doesn't set that id, so callers look the row up by its key instead.
 		public long insertData(string inInsertString, Dictionary<string, object> parameters)
 		{
 			long outVal = 0;
@@ -170,20 +169,6 @@ namespace Core.MTCalSync
 				Common.writeToLog("Error getting db cxn: " + errorMessage);
 			}
 			return tmpCxn;
-		}
-
-		public static bool IsNumeric(object? Expression, NumberStyles numStyle)
-		{
-			if (Expression == null || Expression is DateTime) return false;
-			if (Expression is short || Expression is int || Expression is long || Expression is decimal || Expression is float || Expression is double || Expression is bool)
-				return true;
-			try
-			{
-				double.Parse(Expression.ToString() ?? string.Empty, numStyle);
-				return true;
-			}
-			catch { }
-			return false;
 		}
 	}
 }

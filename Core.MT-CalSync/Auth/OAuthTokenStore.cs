@@ -4,10 +4,9 @@ using Google.Apis.Util.Store;
 
 namespace Core.MTCalSync
 {
-	// Google SDK IDataStore bridging UserCredential's token persistence into
-	// oauth_account (encrypted). When the SDK refreshes an access token it calls
-	// StoreAsync with the full TokenResponse — we write it back so later worker
-	// processes reuse the cached access token instead of re-refreshing every cycle.
+	// Google SDK IDataStore that persists UserCredential tokens, encrypted, to
+	// oauth_account, so later worker processes reuse the access token instead of
+	// refreshing every cycle.
 	public class OAuthTokenStore : IDataStore
 	{
 		private readonly long _accountId;
@@ -52,7 +51,7 @@ namespace Core.MTCalSync
 							: 0,
 						IssuedUtc = DateTime.UtcNow
 					};
-					// Round-trip through the SDK's serializer to satisfy the generic contract.
+					// Round-trip through the SDK serializer to return a T.
 					return Task.FromResult(NewtonsoftJsonSerializer.Instance.Deserialize<T>(
 						NewtonsoftJsonSerializer.Instance.Serialize(token)));
 				}

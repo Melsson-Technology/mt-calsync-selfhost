@@ -6,14 +6,13 @@ using SelfHost.MTCalSync.Models;
 
 namespace SelfHost.MTCalSync.Controllers
 {
-	// /Pairs — create and manage sync pairs (calendar links): the wizard builds them from
-	// connected accounts' calendars, and the operator form makes app-credential pairs
-	// (app_default connections addressed by raw email).
+	// /Pairs: create and manage sync pairs. The wizard builds them from connected accounts'
+	// calendars; the operator form makes app-credential pairs (app_default connections
+	// addressed by email).
 	public class PairsController : Controller
 	{
-		// ── list ──────────────────────────────────────────────────────────────
-		// Every pair. A self-host install has one operator, and app-credential pairs
-		// carry no user, so the old "your pairs" filter hid them behind an admin toggle.
+		// List
+		// Every pair, unfiltered: there is one operator, and app-credential pairs carry no user.
 		[HttpGet]
 		public IActionResult Index()
 		{
@@ -38,7 +37,7 @@ namespace SelfHost.MTCalSync.Controllers
 			return View(rows);
 		}
 
-		// ── self-serve create wizard ──────────────────────────────────────────
+		// Create wizard
 		[HttpGet]
 		public async Task<IActionResult> Create()
 		{
@@ -58,8 +57,8 @@ namespace SelfHost.MTCalSync.Controllers
 			if (source.Value.account.provider == dest.Value.account.provider)
 				return await WizardFailed("Pick one Google calendar and one Microsoft calendar. Pairs sync across the two providers.");
 
-			// Soft write-access check on the destination (skip silently if the
-			// provider listing is unavailable; the first sync surfaces real errors).
+			// Soft write-access check on the destination. Skipped if the listing fails; the
+			// first sync reports real errors.
 			string? destRole = await LookupAccessRole(dest.Value.account, dest.Value.calendarId);
 			if (destRole is "reader" or "freeBusyReader")
 				return await WizardFailed("You only have read access to the destination calendar. Pick one you can edit, or flip the direction.");
@@ -115,7 +114,7 @@ namespace SelfHost.MTCalSync.Controllers
 			return RedirectToAction("Index");
 		}
 
-		// ── pause / resume / remove ───────────────────────────────────────────
+		// Pause, resume, remove
 		[HttpPost, ValidateAntiForgeryToken]
 		public IActionResult SetEnabled(long id, bool enabled)
 		{
@@ -138,7 +137,7 @@ namespace SelfHost.MTCalSync.Controllers
 			return RedirectToAction("Index");
 		}
 
-		// ── legacy operator form (app_default connections) ────────────────────
+		// Operator form (app_default connections)
 		[HttpPost, ValidateAntiForgeryToken]
 		[Authorize(Roles = "Admin")]
 		public IActionResult Add(string name, string m365Email, string googleEmail, string? m365Cal,
@@ -159,7 +158,7 @@ namespace SelfHost.MTCalSync.Controllers
 			return RedirectToAction("Index");
 		}
 
-		// ── helpers ───────────────────────────────────────────────────────────
+		// Helpers
 		private bool CanManage(SyncPair pair) =>
 			pair.pairID != 0 && (PortalAuth.IsAdmin(User) || pair.userID == PortalAuth.UserId(User));
 
@@ -204,9 +203,8 @@ namespace SelfHost.MTCalSync.Controllers
 			return View("Create", model);
 		}
 
-		// Option value format: "{oauthAccountID}:{b64url(calendarId)}:{b64url(summary)}"
-		// — calendar ids on both providers can contain delimiter-unfriendly characters.
-		// The summary segment is display-only (feeds the auto pair name).
+		// Option value: "{oauthAccountID}:{b64url(calendarId)}:{b64url(summary)}". Calendar ids
+		// can contain the delimiter. The summary is display-only (it feeds the pair name).
 		internal static string EncodeCalendarKey(long accountId, string calendarId, string summary) =>
 			$"{accountId}:{B64UrlEncode(calendarId)}:{B64UrlEncode(summary)}";
 

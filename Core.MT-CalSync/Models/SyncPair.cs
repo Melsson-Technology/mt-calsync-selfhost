@@ -2,8 +2,7 @@ using System.Data;
 
 namespace Core.MTCalSync
 {
-	// A bidirectional (or one-way) link between one M365 (left) and one Google
-	// (right) connection.
+	// A two-way or one-way link between one M365 (left) and one Google (right) connection.
 	public class SyncPair : @base
 	{
 		public long pairID { get; set; }
@@ -25,10 +24,6 @@ namespace Core.MTCalSync
 		public DateTime? nextRunAt { get; set; }
 		public int runIntervalSeconds { get; set; } = 300;
 		public DateTime? lastAlertAt { get; set; }
-
-		// Resolve the connectionID for a given source provider on this pair.
-		public long connectionForProvider(string provider) =>
-			provider == Providers.M365 ? leftConnectionID : rightConnectionID;
 
 		// Series preservation only applies in full-detail mode.
 		public bool SeriesMode => recurrenceMode == RecurrenceModes.Series && fidelityMode == Fidelity.FullDetail;
@@ -134,8 +129,8 @@ namespace Core.MTCalSync
 				new Dictionary<string, object> { { "@n", Common.makeMySqlDate(nextUtc) }, { "@id", id } });
 		}
 
-		// One alert email per pair per 24h (owner or operator — shared throttle).
-		// Atomic claim: the UPDATE only wins when the window has passed.
+		// At most one alert email per pair per 24 hours, shared by every recipient. The
+		// UPDATE is the atomic claim: it only matches once the window has passed.
 		public bool shouldAlert(long id)
 		{
 			var oDA = new DataAccess();
@@ -145,10 +140,9 @@ namespace Core.MTCalSync
 				new Dictionary<string, object> { { "@id", id } });
 		}
 
-		// Hard-delete a pair. FK cascade removes its event_mapping / sync_state /
-		// sync_run / dead_letter / sync_lock rows. Does NOT touch provider_connection
-		// (that FK is RESTRICT) or any remote calendar events — callers that want the
-		// mirror events gone must delete them first (see CliCommands.TeardownPair).
+		// Deletes a pair; the foreign keys cascade to its mappings, state, runs, dead letters
+		// and lock. Connections and remote events are left alone, so delete mirrors first
+		// (see CliCommands.TeardownPair).
 		public bool delete(long id)
 		{
 			var oDA = new DataAccess();

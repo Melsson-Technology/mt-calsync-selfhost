@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# provision.sh — one-time self-host setup for MT-CalSync on a Debian/Ubuntu box.
-# Creates the service user + dirs, a local MySQL database and its user, the encryption key,
-# and installs the systemd units. Idempotent: re-running it repairs rather than breaks.
+# provision.sh: one-time setup for MT-CalSync on a Debian/Ubuntu box.
+# Creates the service user and dirs, a local MySQL database and its user, the encryption key,
+# and installs the systemd units. Safe to re-run.
 # Run as root:
 #
 #   sudo ./provision.sh
@@ -27,10 +27,8 @@ DB_USER="${MTCALSYNC_DB_USER:-$APP_USER}"
 echo "==> service user + directories"
 id -u "$APP_USER" >/dev/null 2>&1 || useradd --system --home "$APP_HOME" --shell /usr/sbin/nologin "$APP_USER"
 mkdir -p "$APP_HOME" "$CONF_DIR" "$CONF_DIR/dpkeys"
-# /opt/mtcalsync is root's. deploy-on-server.sh gives the service account its two publish
-# dirs and nothing else: root runs the scripts kept here, so the account the portal runs
-# as must not be able to rename or edit them. An install made by an older version, which
-# handed the whole tree over, is put right here and by the next deploy.
+# /opt/mtcalsync is root's; deploy-on-server.sh gives the service account only its publish
+# dirs. Root runs the scripts kept here, so the portal's account must not be able to edit them.
 chown root:root "$APP_HOME"
 chmod 0755 "$APP_HOME"
 for d in deploy scripts; do
@@ -41,9 +39,8 @@ chmod 0700 "$CONF_DIR/dpkeys"
 
 echo "==> database '$DB_NAME' and its user '$DB_USER'"
 
-# MySQL, not MariaDB. The app reaches the database through Oracle's MySql.Data driver and is
-# built and run against MySQL 8. MariaDB gets part of the way and then fails somewhere far
-# less obvious than here, so refuse it up front.
+# MySQL, not MariaDB: the app uses Oracle's MySql.Data driver against MySQL 8, and MariaDB
+# fails later in less obvious places, so refuse it here.
 server_version="$(mysql -N -B -e 'SELECT VERSION();')"
 case "$server_version" in
     *MariaDB*)
@@ -57,23 +54,17 @@ if [[ "${server_version%%.*}" -lt 8 ]]; then
     exit 1
 fi
 
-# Password authentication over loopback TCP, with TLS required: the arrangement the hosted
-# service runs on, through the same driver.
+# Password authentication over loopback TCP, with TLS required. auth_socket can't work:
+# MySql.Data connects over TCP even for Server=localhost.
 #
-# This script used to create the user IDENTIFIED WITH auth_socket and write a connection
-# string with no password. That could never connect. MySql.Data opens a TCP connection for
-# Server=localhost, and socket authentication only works over the Unix socket file. The
-# CREATE USER error was also swallowed by `|| true`, so provisioning reported success and the
-# app failed at its first query.
-#
-# The password is hex, so it needs no escaping in SQL, in XML, or in a connection string,
-# where a ';' would silently cut it short. A password already in settings.xml is reused, so
-# re-running this never breaks a working install; MTCALSYNC_DB_PASSWORD rotates it.
+# The password is hex, so it needs no escaping in SQL, XML or a connection string (where a
+# ';' would cut it short). A password already in settings.xml is reused, so re-running keeps
+# a working install; MTCALSYNC_DB_PASSWORD rotates it.
 existing_conn=""
 existing_pass=""
 if [[ -f "$SETTINGS" ]]; then
-    # First match only, taken in bash rather than with `| head -1`: under pipefail a head that
-    # exits early can hand sed a SIGPIPE and fail the whole assignment.
+    # First match taken in bash, not `| head -1`: under pipefail, head exiting early can
+    # SIGPIPE sed and fail the assignment.
     existing_conn="$(sed -n 's#.*<MySqlDatabaseConnection>\(.*\)</MySqlDatabaseConnection>.*#\1#p' "$SETTINGS")"
     existing_conn="${existing_conn%%$'\n'*}"
     IFS=';' read -ra parts <<<"$existing_conn"
@@ -89,9 +80,8 @@ if [[ ! "$DB_PASS" =~ ^[A-Za-z0-9._~-]+$ ]]; then
     exit 1
 fi
 
-# The plugin is named rather than left to the server's default, so an account created by
-# the old auth_socket version of this script is converted, not merely re-passworded. Both
-# hosts are granted because a TCP connection to 127.0.0.1 can match either.
+# The plugin is named so an existing auth_socket account is converted, not just
+# re-passworded. Both hosts are granted because a TCP connection to 127.0.0.1 can match either.
 mysql <<SQL
 CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED WITH caching_sha2_password BY '$DB_PASS';
@@ -102,8 +92,8 @@ GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'localhost';
 GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'127.0.0.1';
 SQL
 
-# Prove it the way the app will connect, not the way root does. A password in a file rather
-# than on the command line, so it never appears in `ps`.
+# Test the connection the way the app makes it. The password goes in a file so it never
+# appears in `ps`.
 cnf="$(mktemp)"; chmod 0600 "$cnf"
 printf '[client]\nuser=%s\npassword=%s\nhost=127.0.0.1\nport=3306\nprotocol=TCP\nssl-mode=REQUIRED\n' \
     "$DB_USER" "$DB_PASS" > "$cnf"
@@ -139,8 +129,8 @@ else
         echo "    added a DataEncryptionKey to existing $SETTINGS"
     }
 
-    # Rewrite the connection string only when it has no password (the old auth_socket
-    # layout) or the password is being rotated. Anything else is left exactly as it is.
+    # Rewrite the connection string only when it has no password (an auth_socket layout)
+    # or the password is being rotated.
     if [[ -z "$existing_pass" || -n "${MTCALSYNC_DB_PASSWORD:-}" ]] && [[ "$existing_conn" != "$CONN" ]]; then
         backup="$SETTINGS.pre-provision-$(date -u +%Y%m%d-%H%M%S)"
         cp -a "$SETTINGS" "$backup"

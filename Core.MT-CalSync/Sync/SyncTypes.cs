@@ -2,9 +2,8 @@ using System.Text;
 
 namespace Core.MTCalSync
 {
-	// ── Provider identity ────────────────────────────────────────────────────
-	// Left is always M365, right is always Google (see schema). The engine works in
-	// terms of the source provider of a change and mirrors to the "other" side.
+	// Left is always M365 and right is always Google (see schema). The engine works from a
+	// change's source provider and mirrors to the other side.
 	public static class Providers
 	{
 		public const string M365 = "m365";
@@ -54,7 +53,7 @@ namespace Core.MTCalSync
 		public const string Series = "series";        // preserve masters + RRULE
 	}
 
-	// ── Provenance stamp keys (written into provider extended properties) ─────
+	// Provenance stamp keys, written into provider extended properties.
 	// Graph: singleValueExtendedProperties "String {namespaceGuid} Name <key>".
 	// Google: extendedProperties.private["<key>"].
 	public static class StampKeys
@@ -83,8 +82,8 @@ namespace Core.MTCalSync
 		public string OriginICalUid { get; set; } = string.Empty;
 		public string AppId { get; set; } = string.Empty;
 
-		// True when this event is a mirror WE wrote onto `polledProvider` (its origin
-		// is the OTHER side) for this pair — i.e. an echo, not a native source change.
+		// True when this pair wrote this event onto `polledProvider` as a mirror of the other
+		// side: an echo, not a native change.
 		public bool IsOurMirrorOn(string polledProvider, long pairId) =>
 			Managed && PairId == pairId && OriginSystem.Length > 0 && OriginSystem != polledProvider;
 
@@ -103,7 +102,7 @@ namespace Core.MTCalSync
 		}
 	}
 
-	// ── Rolling window ───────────────────────────────────────────────────────
+	// Rolling window
 	public class RollingWindow
 	{
 		public DateTime StartUtc { get; set; }
@@ -121,7 +120,7 @@ namespace Core.MTCalSync
 		public RollingWindow ExtendedBy(TimeSpan tail) => new() { StartUtc = StartUtc, EndUtc = EndUtc + tail };
 	}
 
-	// ── RemoteEvent: normalized event read from either provider ───────────────
+	// A normalized event read from either provider.
 	public class RemoteEvent
 	{
 		public string Provider { get; set; } = string.Empty;   // m365|google
@@ -146,15 +145,14 @@ namespace Core.MTCalSync
 		public int AttendeeCount { get; set; }                 // every attendee, named or not
 		public Provenance Stamp { get; set; } = new();         // parsed mtcs_* (may be unmanaged)
 
-		// An exception/override instance of a series (has a master + an original start),
-		// but NOT the master itself.
+		// An exception or override of a series (it has a master or an original start), never
+		// the master itself.
 		public bool IsRecurringInstance => !IsSeriesMaster && (!string.IsNullOrEmpty(SeriesMasterId) || OccurrenceOriginalStartUtc.HasValue);
 	}
 
-	// ── ProjectedUnit: the payload written to the mirror side ─────────────────
+	// The payload written to the mirror side.
 	public class ProjectedUnit
 	{
-		public string UnitKey { get; set; } = string.Empty;    // originSeriesKey|occStartUtc  OR  originId
 		public string UnitKind { get; set; } = UnitKinds.Single;
 		public string OriginSeriesKey { get; set; } = string.Empty;
 		public DateTime? OccurrenceOriginalStartUtc { get; set; }
@@ -164,22 +162,22 @@ namespace Core.MTCalSync
 		public string TimeZoneId { get; set; } = "UTC";
 		public bool IsAllDay { get; set; }
 		public string ShowAs { get; set; } = "busy";
-		// Marked private on the origin, so the mirror is written private too: on the other
-		// calendar, anyone the calendar is shared with sees only that the time is taken.
+		// A private origin gives a private mirror, so people the other calendar is shared with
+		// see only that the time is taken.
 		public bool IsPrivate { get; set; }
 		public string Subject { get; set; } = "Busy";
 		public string? Body { get; set; }
 		public string? Location { get; set; }
 		public string? RecurrenceRule { get; set; }
 
-		// Identity of the ORIGIN event (for stamping + mapping).
+		// Identity of the origin event, for the stamp and the mapping.
 		public string OriginProvider { get; set; } = string.Empty;
 		public string OriginId { get; set; } = string.Empty;
 		public string OriginICalUid { get; set; } = string.Empty;
 
 		public string Hash { get; set; } = string.Empty;
 
-		// Canonical content hash of exactly what we mirror. Order-stable.
+		// Canonical, order-stable hash of the mirrored content.
 		public string ComputeHash()
 		{
 			var sb = new StringBuilder();
@@ -192,14 +190,14 @@ namespace Core.MTCalSync
 			  .Append(Location ?? string.Empty).Append('|')
 			  .Append(Body ?? string.Empty).Append('|')
 			  .Append(RecurrenceRule ?? string.Empty);
-			// Appended only when set, so every event that isn't private keeps the hash it had
-			// before privacy was carried across, and existing mirrors aren't all rewritten.
+			// Appended only when set, so a non-private event's hash doesn't include the flag and
+			// its existing mirror isn't rewritten.
 			if (IsPrivate) sb.Append("|private");
 			return Common.Sha256Hex(sb.ToString());
 		}
 	}
 
-	// ── ChangeSet: result of an incremental (or full) pull ───────────────────
+	// The result of an incremental or full pull.
 	public class ChangeSet
 	{
 		public List<RemoteEvent> Items { get; set; } = new();

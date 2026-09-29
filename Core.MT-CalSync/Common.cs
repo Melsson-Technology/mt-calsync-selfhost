@@ -5,9 +5,8 @@ using System.Text;
 
 namespace Core.MTCalSync
 {
-	// Shared helpers. writeToLog writes a rolling per-day file under logs/ next to
-	// the assembly; systemd also captures stdout to journald. Plus the greppable
-	// structured audit line the sync engine emits.
+	// Shared helpers. writeToLog appends to a per-day file under logs/ next to the
+	// assembly; audit also writes to stdout, which systemd sends to the journal.
 	public class Common
 	{
 		private static string GetExecutableDirectory()
@@ -45,8 +44,7 @@ namespace Core.MTCalSync
 
 		public static void writeToLog(string logText, Exception ex) => writeToLog(logText + ex.ToString());
 
-		// Structured, grep-friendly one-liner for per-item sync decisions. Also echoed
-		// to stdout so journalctl shows it. Example:
+		// One greppable line per sync decision, to the log and stdout. Example:
 		//   MTCS pair=42 run=1001 side=google op=create unit=occurrence origin=m365 mirror=abc hash=9f3a result=ok
 		public static void audit(string line)
 		{
@@ -54,30 +52,26 @@ namespace Core.MTCalSync
 			writeToLog("MTCS " + line);
 		}
 
-		public static string getMySqlNow() => DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+		public static string getMySqlNow() => DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
 		public static string makeMySqlDate(DateTime inDate)
 		{
 			if (inDate == default) return "1970-01-01 00:00:00";
-			return inDate.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss");
+			return inDate.ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 		}
 
-		// Google/RFC3339 UTC timestamp ("...Z").
+		// RFC 3339 UTC timestamp ("...Z"), as Google expects.
 		public static string ConvertDateTimeToRfc3339(DateTime dateTime)
 		{
 			if (dateTime.Kind != DateTimeKind.Utc)
 				dateTime = dateTime.ToUniversalTime();
-			return dateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
+			return dateTime.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture);
 		}
 
-		public static bool IsNumeric(string input, NumberStyles numberStyle) =>
-			double.TryParse(input, numberStyle, CultureInfo.CurrentCulture, out _);
-
-		// ── DataRow coercion helpers (used by every dataRowToObject) ──────────
-		// All DATETIME columns are written as UTC; reads come back Kind=Unspecified,
-		// so ToDateTimeUtc re-stamps them Utc.
+		// DataRow coercion for the models' dataRowToObject.
+		// DATETIME columns hold UTC but read back as Kind=Unspecified, so ToDateTimeUtc
+		// marks them Utc.
 		public static string ToStr(object? v) => (v == null || v == DBNull.Value) ? string.Empty : (v.ToString() ?? string.Empty);
-		public static string? ToStrOrNull(object? v) => (v == null || v == DBNull.Value) ? null : v.ToString();
 		public static long ToLong(object? v) => (v == null || v == DBNull.Value) ? 0 : (long.TryParse(v.ToString(), out var l) ? l : 0);
 		public static int ToInt(object? v) => (v == null || v == DBNull.Value) ? 0 : (int.TryParse(v.ToString(), out var i) ? i : 0);
 		public static bool ToBool(object? v)
@@ -94,9 +88,8 @@ namespace Core.MTCalSync
 			return DateTime.TryParse(v.ToString(), out var p) ? DateTime.SpecifyKind(p, DateTimeKind.Utc) : null;
 		}
 
-		// SHA-256 hex of a UTF-8 string. Used for (a) the fixed 64-char event-key that
-		// indexes long provider ids, and (b) the content hash that drives change/echo
-		// detection.
+		// SHA-256 hex of a UTF-8 string: the 64-char key that indexes long provider ids,
+		// and the content hash behind change and echo detection.
 		public static string Sha256Hex(string? input)
 		{
 			byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input ?? string.Empty));

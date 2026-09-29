@@ -2,16 +2,11 @@ using Azure.Core;
 
 namespace Core.MTCalSync
 {
-	// Azure TokenCredential backed by a stored refresh token — what GraphServiceClient
-	// uses for delegated (per-user OAuth) connections. Token custody:
-	//   1. in-memory cache (this process),
-	//   2. encrypted access token in oauth_account (worker runs are separate
-	//      short-lived processes; a ~60-min access token spans many 5-min cycles),
-	//   3. refresh-token POST to the account's HOME tenant, persisting the rotated
-	//      refresh token whenever Microsoft returns one.
-	// invalid_grant means the grant is dead (revoked/expired/policy) → mark the
-	// account needs_reauth and surface NeedsReauthException so the engine files the
-	// run as skipped_auth instead of dead-lettering.
+	// TokenCredential for delegated Graph connections, backed by a stored refresh token.
+	// Lookup order: in-process cache; the encrypted access token in oauth_account (it
+	// outlives short-lived worker processes); a refresh against the home tenant, saving
+	// any rotated refresh token. invalid_grant marks the account needs_reauth and raises
+	// NeedsReauthException, so the run is skipped rather than dead-lettered.
 	public class MsDelegatedTokenCredential : TokenCredential
 	{
 		private readonly long _accountId;
@@ -36,8 +31,8 @@ namespace Core.MTCalSync
 			{
 				if (Fresh()) return new AccessToken(_cachedToken!, _cachedExpiry);
 
-				// Reload the row each time — another process may have rotated the
-				// refresh token or cached a newer access token since we were built.
+				// Reload the row: another process may have rotated the refresh token or
+				// stored a newer access token.
 				var account = new OAuthAccount().getById(_accountId);
 				if (account.oauthAccountID == 0 || !account.isConnected)
 					throw new NeedsReauthException(_accountId, Providers.M365, "OAuth account missing or not connected.");
@@ -66,9 +61,9 @@ namespace Core.MTCalSync
 						account.markNeedsReauth(_accountId, $"{res.Error}: {res.ErrorDescription}");
 						throw new NeedsReauthException(_accountId, Providers.M365, "Refresh token rejected (invalid_grant).");
 					}
-					// invalid_client is the app's own secret, expired or wrong: no retry fixes it,
-					// so it alerts the operator at once. Anything else is endpoint trouble — fail
-					// this run without flagging the account.
+					// invalid_client/unauthorized_client mean the app's own registration is wrong,
+					// which no retry fixes. Anything else is endpoint trouble: fail this run
+					// without flagging the account.
 					bool appMisconfigured = res.Error == "invalid_client" || res.Error == "unauthorized_client";
 					throw new ProviderException($"ms.token: {res.Error}: {res.ErrorDescription}", res.Error, isTransient: !appMisconfigured);
 				}

@@ -4,19 +4,9 @@ using Core.MTCalSync;
 
 namespace Worker.MTCalSync
 {
-	// Thin CLI over Core.MTCalSync — the self-host engine worker. The `sync` subcommand
-	// is what the systemd timer runs (mtcalsync-worker@sync). Job logic lives in Core
-	// (SyncEngine / CliCommands). This is the self-host worker: sync runs for every
-	// enabled pair, with no subscription/entitlement gating layered on top.
-	//
-	//   Worker.MT-CalSync setup-check
-	//   Worker.MT-CalSync add-pair --m365-email a@corp.com --google-email b@fam.com
-	//   Worker.MT-CalSync list-pairs
-	//   Worker.MT-CalSync sync [--pair N] [--full] [--dry-run] [--force]
-	//   Worker.MT-CalSync status | history --pair N | resync --pair N
-	//   Worker.MT-CalSync pause --pair N | resume --pair N
-	//   Worker.MT-CalSync dead-letters --pair N [--resolve M | --resolve-all]
-	//   Worker.MT-CalSync test-email | set-secret <name> | set-admin-password
+	// Thin CLI over Core.MTCalSync; the logic lives in SyncEngine and CliCommands. The
+	// systemd timer runs the `sync` subcommand (mtcalsync-worker@sync). Usage() lists
+	// every command.
 	public class Program
 	{
 		public static async Task<int> Main(string[] args)
@@ -58,8 +48,8 @@ namespace Worker.MTCalSync
 							if (run == null) return 1;   // no such pair (RunPairById has said so)
 							return run.status == "failed" || run.status == "aborted_circuit_breaker" ? 2 : 0;
 						}
-						// Default tick = the scheduler (due pairs, concurrency, backoff, account
-						// gates); --sequential keeps the simple run-everything loop for debugging.
+						// The scheduler handles due pairs, concurrency, backoff and account gates;
+						// --sequential runs every enabled pair in turn, for debugging.
 						if (a.Flag("sequential"))
 							return await SyncEngine.RunAllEnabled("timer", dry, force, full);
 						return await SyncScheduler.RunDue("timer", dry, force, full);
@@ -118,10 +108,9 @@ namespace Worker.MTCalSync
 					case "test-email":
 						return CliCommands.TestEmail() ? 0 : 1;
 
-					// Secrets are read from a prompt (or stdin) rather than taken as arguments:
-					// the documented `mtcs` alias runs through sudo, which records the whole
-					// command line in the system log. A value on the command line still works,
-					// for compatibility, but the docs no longer show it.
+					// Secrets come from a prompt or stdin, not arguments: the `mtcs` alias runs
+					// through sudo, which logs the whole command line. A value given as an
+					// argument is still accepted but not documented.
 					case "set-secret":
 					{
 						if (args.Length < 2 || args[1].StartsWith("--")) { Console.WriteLine("Usage: set-secret <name>   (you'll be prompted for the value)"); return 1; }
@@ -171,10 +160,9 @@ namespace Worker.MTCalSync
 			return string.Empty;
 		}
 
-		// Echo goes off before the prompt appears (stty) and the line is read straight from
-		// /dev/tty, the way sudo reads its own password. Console.ReadKey only turns echo off
-		// while it is waiting for a key, so input that arrived just ahead of the first call
-		// (a paste, or a script answering the prompt the instant it showed) was echoed.
+		// Echo goes off (stty) before the prompt appears and the line is read from /dev/tty,
+		// as sudo does. Console.ReadKey only hides input while it waits for a key, so a paste
+		// that arrives before the first call would be echoed.
 		private static string ReadHidden(string prompt)
 		{
 			if (!OperatingSystem.IsWindows() && SetTerminalEcho(false))

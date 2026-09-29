@@ -5,10 +5,9 @@ using SelfHost.MTCalSync.Models;
 
 namespace SelfHost.MTCalSync.Controllers
 {
-	// /Settings — the credentials + config form. Secrets (Graph client secret, Google
-	// service-account JSON, SMTP password, OAuth client secrets) are stored AES-encrypted
-	// in the DB settings table and never rendered back in full (see Mask). Plain config is
-	// stored plaintext and resolves DB-first, so the UI is the source of truth.
+	// /Settings: credentials and config. Secrets are stored AES-encrypted in the settings
+	// table and never rendered back in full (see Mask). Plain config is stored as plaintext
+	// and resolves DB-first, so the UI is the source of truth.
 	[Authorize(Roles = "Admin")]
 	public class SettingsController : Controller
 	{
@@ -74,8 +73,7 @@ namespace SelfHost.MTCalSync.Controllers
 			s.saveByName("PublicBaseUrl", Trim(form.PublicBaseUrl).TrimEnd('/'));
 			s.saveByName("WorkerMaxConcurrency", form.WorkerMaxConcurrency.ToString());
 
-			// Secrets — write-only. Only overwrite when a non-blank value is submitted, so a
-			// blank field preserves the stored secret. Stored encrypted.
+			// Secrets are write-only: a blank field keeps the stored secret.
 			if (!string.IsNullOrWhiteSpace(graphClientSecret))
 				s.saveByName("GraphClientSecret", Encryption.Encrypt(graphClientSecret.Trim()));
 			if (!string.IsNullOrWhiteSpace(googleServiceAccountJson))
@@ -93,10 +91,8 @@ namespace SelfHost.MTCalSync.Controllers
 
 		private static string Trim(string? v) => (v ?? string.Empty).Trim();
 
-		// The last four characters tell you which API key or client secret is stored, at a
-		// negligible cost for a long random value. A short one is usually a password a
-		// person chose (SMTP), where four characters can be half of it, so that shows only
-		// that something is set.
+		// The last four characters identify a long random secret at negligible cost. A short
+		// value is usually a chosen password (SMTP), so it shows only that something is set.
 		private const int MinLengthToHint = 20;
 
 		private static string Mask(string v)

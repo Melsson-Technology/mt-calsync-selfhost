@@ -2,10 +2,9 @@ using System.Data;
 
 namespace Core.MTCalSync
 {
-	// A user's OAuth grant for one external account (Microsoft or Google). Holds
-	// the encrypted refresh token (the durable credential) plus a cached access
-	// token so short-lived worker processes don't hit the token endpoint every
-	// cycle. Multiple provider_connection rows (one per calendar) share one grant.
+	// A user's OAuth grant for one Microsoft or Google account. Holds the encrypted
+	// refresh token and a cached access token, so short-lived worker processes don't hit
+	// the token endpoint every cycle. One grant can back several calendar connections.
 	public class OAuthAccount : @base
 	{
 		public const string StatusConnected = "connected";
@@ -31,7 +30,7 @@ namespace Core.MTCalSync
 
 		public bool isConnected => status == StatusConnected;
 
-		// Decrypt-on-demand — plaintext tokens are never kept on the entity.
+		// Decrypted on demand; plaintext tokens are never kept on the entity.
 		public string decryptRefreshToken() => string.IsNullOrEmpty(refreshTokenEnc) ? string.Empty : Encryption.Decrypt(refreshTokenEnc);
 		public string decryptAccessToken() => string.IsNullOrEmpty(accessTokenEnc) ? string.Empty : Encryption.Decrypt(accessTokenEnc);
 
@@ -108,8 +107,8 @@ namespace Core.MTCalSync
 			return oauthAccountID;
 		}
 
-		// Persist rotated/refreshed tokens. Null keeps the stored value (Google never
-		// rotates refresh tokens; Microsoft usually returns a new one).
+		// Saves refreshed tokens. Null keeps the stored value: Google doesn't rotate refresh
+		// tokens, while Microsoft usually returns a new one.
 		public void updateTokens(long id, string? newRefreshTokenEnc, string? newAccessTokenEnc, DateTime? expiresAt)
 		{
 			var oDA = new DataAccess();

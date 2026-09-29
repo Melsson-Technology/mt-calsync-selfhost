@@ -1,19 +1,17 @@
--- MT-CalSync engine schema (baseline).
+-- MT-CalSync engine schema.
 --
 -- Apply to a MySQL 8 database (MariaDB is not supported):
 --   mysql -h <host> -u <user> -p <db> < 001_schema.sql
--- (load-schema.sh applies Sql/*.sql in numeric order.) Every table is CREATE TABLE IF
--- NOT EXISTS, so a re-run is a no-op; it never alters an existing table, and there is
--- no migration tracking.
+-- load-schema.sh applies Sql/*.sql in numeric order. Every table is CREATE TABLE IF
+-- NOT EXISTS, so a re-run changes nothing; it never alters an existing table.
 --
--- Self-host uses the built-in tenant id 1 for the userID/customerID columns, which
--- have NO foreign keys here so the engine schema applies standalone. An application
--- built on the engine can add its own identity tables (and the oauth_account FKs)
--- on top.
+-- The userID/customerID columns hold the built-in owner id 1 and have no foreign keys,
+-- so the schema applies standalone. An application built on the engine can add its
+-- own identity tables, and the oauth_account foreign keys, on top.
 
--- oauth_account: a user's OAuth grant for one external account (Microsoft or Google).
--- Holds the encrypted refresh token (durable) + a cached access token; many
--- provider_connection rows (one per calendar) can share one grant.
+-- oauth_account: a user's OAuth grant for one Microsoft or Google account: the
+-- encrypted refresh token and a cached access token. One grant can back several
+-- provider_connection rows.
 CREATE TABLE IF NOT EXISTS oauth_account (
     oauthAccountID       BIGINT AUTO_INCREMENT PRIMARY KEY,
     userID               BIGINT NOT NULL,
@@ -38,9 +36,9 @@ CREATE TABLE IF NOT EXISTS oauth_account (
     INDEX idx_oauth_user (userID)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- provider_connection: one calendar endpoint on one provider. authKind selects how
--- credentials are built -- 'app_default' (global app creds) or 'delegated_oauth'
--- (per-user grant via oauthAccountID). credentialRef names the encrypted setting.
+-- provider_connection: one calendar on one provider. authKind is 'app_default' (the
+-- global app credentials) or 'delegated_oauth' (the grant in oauthAccountID).
+-- credentialRef names the encrypted setting.
 CREATE TABLE IF NOT EXISTS provider_connection (
     connectionID        BIGINT AUTO_INCREMENT PRIMARY KEY,
     userID              BIGINT NULL,
@@ -93,9 +91,9 @@ CREATE TABLE IF NOT EXISTS sync_pair (
     INDEX idx_pair_due (enabled, nextRunAt)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- event_mapping: the crux cross-reference. SHA-256 *EventKey columns carry the unique
--- keys because raw provider ids exceed MySQL's utf8mb4 index byte limit (3072 bytes);
--- the single-column key indexes serve the cross-pair foreign-mirror guard.
+-- event_mapping: links an M365 event to its Google counterpart. The unique keys use the
+-- SHA-256 *EventKey columns because raw provider ids exceed MySQL's 3072-byte index
+-- limit; the single-column key indexes serve the cross-pair foreign-mirror guard.
 CREATE TABLE IF NOT EXISTS event_mapping (
     mappingID               BIGINT AUTO_INCREMENT PRIMARY KEY,
     pairID                  BIGINT NOT NULL,
@@ -133,9 +131,9 @@ CREATE TABLE IF NOT EXISTS event_mapping (
     CONSTRAINT fk_map_pair FOREIGN KEY (pairID) REFERENCES sync_pair(pairID) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- sync_state: per (pair, provider) delta/sync tokens + window bookkeeping. windowStart/
--- End matter because a Graph deltaLink is bound to the calendarView window it was minted
--- for and does not auto-extend as the rolling window slides forward.
+-- sync_state: delta/sync tokens and window bookkeeping per (pair, provider). The window
+-- is stored because a Graph deltaLink is bound to the calendarView range it was issued
+-- for and doesn't extend as the rolling window moves forward.
 CREATE TABLE IF NOT EXISTS sync_state (
     syncStateID          BIGINT AUTO_INCREMENT PRIMARY KEY,
     pairID               BIGINT NOT NULL,
@@ -153,7 +151,7 @@ CREATE TABLE IF NOT EXISTS sync_state (
     CONSTRAINT fk_state_pair FOREIGN KEY (pairID) REFERENCES sync_pair(pairID) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- sync_run: per-run audit + counters.
+-- sync_run: one row per run, with its counters.
 CREATE TABLE IF NOT EXISTS sync_run (
     runID            BIGINT AUTO_INCREMENT PRIMARY KEY,
     pairID           BIGINT NOT NULL,
@@ -177,8 +175,8 @@ CREATE TABLE IF NOT EXISTS sync_run (
     CONSTRAINT fk_run_pair FOREIGN KEY (pairID) REFERENCES sync_pair(pairID) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- dead_letter: items that fail permanently/repeatedly. The UNIQUE key makes a re-failing
--- item bump attemptCount instead of spamming rows; open rows are skipped so one poison
+-- dead_letter: items that fail permanently or repeatedly. The unique key makes a repeat
+-- failure bump attemptCount rather than add a row; open rows are skipped so one poison
 -- event can't fail the whole pair.
 CREATE TABLE IF NOT EXISTS dead_letter (
     deadLetterID     BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -201,8 +199,8 @@ CREATE TABLE IF NOT EXISTS dead_letter (
     CONSTRAINT fk_dl_pair FOREIGN KEY (pairID) REFERENCES sync_pair(pairID) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- sync_lock: lease-based per-pair advisory lock (compare-and-set on leaseExpiresAt).
--- Used instead of GET_LOCK() because DataAccess opens a fresh connection per call.
+-- sync_lock: per-pair lease lock, compare-and-set on leaseExpiresAt. GET_LOCK() can't
+-- be used because DataAccess opens a fresh connection per call.
 CREATE TABLE IF NOT EXISTS sync_lock (
     pairID           BIGINT PRIMARY KEY,
     lockedBy         VARCHAR(128) NULL,                  -- host:pid:guid of the holding run
@@ -211,7 +209,7 @@ CREATE TABLE IF NOT EXISTS sync_lock (
     CONSTRAINT fk_lock_pair FOREIGN KEY (pairID) REFERENCES sync_pair(pairID) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- settings: DB-backed runtime settings (AES-encrypted secret overrides + runtime flags).
+-- settings: runtime settings, including encrypted secrets, that override settings.xml.
 CREATE TABLE IF NOT EXISTS settings (
     settingID            BIGINT AUTO_INCREMENT PRIMARY KEY,
     settingName          VARCHAR(100) UNIQUE NOT NULL,

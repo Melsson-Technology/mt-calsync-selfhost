@@ -6,22 +6,22 @@ using Google.Apis.Auth.OAuth2.Responses;
 
 namespace Core.MTCalSync
 {
-	// Google OAuth web-server flow. The consent/exchange legs are plain HTTP (same
-	// shape as the Microsoft flow); at runtime the stored refresh token is wrapped
-	// in the SDK's UserCredential, which auto-refreshes access tokens and persists
-	// them back through OAuthTokenStore. Google refresh tokens don't rotate — but
-	// they DO expire after 7 days while the consent screen is in "Testing", which
-	// exercises the needs_reauth path until verification moves us to production.
+	// Google OAuth web-server flow. Consent and code exchange are plain HTTP, like the
+	// Microsoft flow; at runtime the SDK's UserCredential refreshes access tokens and
+	// persists them through OAuthTokenStore. Refresh tokens don't rotate, but expire
+	// after 7 days while the consent screen is in "Testing" (surfacing as needs_reauth).
 	public static class GoogleOAuthFlow
 	{
 		private static readonly HttpClient _http = new();
 
-		// Least-privilege per the product spec: event read/write + calendar list for
-		// the picker. openid/email identify the account (`sub` is the stable id).
-		public const string Scopes =
-			"openid email " +
-			"https://www.googleapis.com/auth/calendar.events " +
-			"https://www.googleapis.com/auth/calendar.calendarlist.readonly";
+		// Least privilege: event read/write plus the calendar list for the picker.
+		// openid/email identify the account (`sub` is the stable id).
+		private static readonly string[] CalendarScopes =
+		{
+			"https://www.googleapis.com/auth/calendar.events",
+			"https://www.googleapis.com/auth/calendar.calendarlist.readonly"
+		};
+		public static readonly string Scopes = "openid email " + string.Join(" ", CalendarScopes);
 
 		public class TokenResult
 		{
@@ -42,7 +42,7 @@ namespace Core.MTCalSync
 				{ "redirect_uri", redirectUri },
 				{ "response_type", "code" },
 				{ "scope", Scopes },
-				// offline + consent guarantees a refresh token on every (re)connect.
+				// offline + consent returns a refresh token on every connect and reconnect.
 				{ "access_type", "offline" },
 				{ "prompt", "consent" },
 				{ "state", state },
@@ -96,7 +96,7 @@ namespace Core.MTCalSync
 
 		public class IdClaims
 		{
-			public string Subject { get; set; } = string.Empty;   // sub — stable account id
+			public string Subject { get; set; } = string.Empty;   // sub: stable account id
 			public string Email { get; set; } = string.Empty;
 		}
 
@@ -118,7 +118,7 @@ namespace Core.MTCalSync
 			return claims;
 		}
 
-		// Best-effort revoke on disconnect (kills the refresh token + its grants).
+		// Best-effort revoke on disconnect; invalidates the refresh token and its grants.
 		public static async Task<bool> RevokeAsync(string token)
 		{
 			if (string.IsNullOrWhiteSpace(token)) return false;
@@ -131,8 +131,8 @@ namespace Core.MTCalSync
 			catch (Exception ex) { Common.writeToLog("WARN GoogleOAuthFlow.RevokeAsync:", ex); return false; }
 		}
 
-		// Runtime credential for calendar API calls: stored refresh token → SDK
-		// UserCredential (auto-refresh) persisting through OAuthTokenStore.
+		// The runtime credential: a self-refreshing UserCredential over the stored
+		// refresh token, persisting through OAuthTokenStore.
 		public static UserCredential BuildUserCredential(OAuthAccount account)
 		{
 			var flow = new GoogleAuthorizationCodeFlow(new GoogleAuthorizationCodeFlow.Initializer
@@ -142,8 +142,7 @@ namespace Core.MTCalSync
 					ClientId = Settings.GoogleOAuthClientId,
 					ClientSecret = Settings.EffectiveGoogleOAuthClientSecret
 				},
-				Scopes = new[] { "https://www.googleapis.com/auth/calendar.events",
-								 "https://www.googleapis.com/auth/calendar.calendarlist.readonly" },
+				Scopes = CalendarScopes,
 				DataStore = new OAuthTokenStore(account.oauthAccountID)
 			});
 

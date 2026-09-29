@@ -2,7 +2,7 @@ using System.Data;
 
 namespace Core.MTCalSync
 {
-	// Per (pair, provider) incremental-sync tokens + window bookkeeping.
+	// Incremental-sync tokens and window bookkeeping for one (pair, provider).
 	public class SyncState : @base
 	{
 		public long syncStateID { get; set; }
@@ -19,7 +19,7 @@ namespace Core.MTCalSync
 
 		public bool HasToken => !string.IsNullOrEmpty(deltaLink) || !string.IsNullOrEmpty(syncToken);
 
-		// Get-or-empty (syncStateID == 0 means no row yet).
+		// Returns an empty state (syncStateID 0) when there is no row yet.
 		public SyncState getByPairProvider(long pair, string prov)
 		{
 			var o = new SyncState { pairID = pair, provider = prov };
@@ -34,8 +34,8 @@ namespace Core.MTCalSync
 			return o;
 		}
 
-		// Persist the new token + the range it covers after a successful page-drain. Upsert on
-		// (pairID, provider). Also records success + optional full-resync stamp.
+		// After all pages are read, saves the new token and the window it covers, and records
+		// the success (and the full resync, if it was one).
 		public void saveAfterRun(string? newToken, RollingWindow window, bool wasFull)
 		{
 			var oDA = new DataAccess();
@@ -75,7 +75,7 @@ namespace Core.MTCalSync
 			catch (Exception ex) { Common.writeToLog("ERROR SyncState.recordFailure:", ex); }
 		}
 
-		// Clear tokens for a pair (both providers) — forces the next run to full sync.
+		// Clears both sides' tokens, so the next run does a full sync.
 		public void resetTokens(long pair)
 		{
 			var oDA = new DataAccess();

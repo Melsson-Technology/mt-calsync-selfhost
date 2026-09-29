@@ -1,7 +1,7 @@
 namespace SelfHost.MTCalSync.Models
 {
-	// Backing model for the credentials/config form. Secrets are never sent back to the
-	// page as values — only a masked "…status". Plain config is prefilled.
+	// Backing model for the settings form. Secrets come back only as a masked status;
+	// plain config is prefilled.
 	public class SettingsViewModel
 	{
 		// Microsoft 365 / Graph

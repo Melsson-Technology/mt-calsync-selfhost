@@ -1,16 +1,13 @@
 namespace Core.MTCalSync
 {
-	// The multi-tenant tick. The systemd timer fires every minute; RunDue claims
-	// only pairs whose nextRunAt has arrived, filters out pairs whose customer
-	// isn't entitled or whose accounts are flagged/throttled, and runs the rest
-	// under a small concurrency cap. Per-pair failures never touch other pairs.
+	// The per-minute tick. RunDue takes pairs whose nextRunAt has arrived, skips those the
+	// sync gate refuses or whose accounts are flagged or throttled, and runs the rest under
+	// a concurrency cap. One pair's failure never affects another.
 	//
 	// Rescheduling after each run:
-	//   healthy   → now + runIntervalSeconds + jitter(0–60s)  (jitter de-clumps
-	//               pairs created at the same moment)
-	//   failed    → exponential: interval · 2^consecutiveFailures, capped at 1h
-	//   gated     → now + interval (cheap re-check; resumes automatically when
-	//               entitlement/account recovers)
+	//   healthy → now + interval + 0–60s jitter, so pairs created together spread out
+	//   failed  → interval · 2^consecutiveFailures, capped at 1h
+	//   gated   → now + interval, a cheap re-check that resumes once the gate clears
 	public static class SyncScheduler
 	{
 		public static async Task<int> RunDue(string trigger, bool dryRun = false, bool force = false, bool fullResync = false)
@@ -26,20 +23,19 @@ namespace Core.MTCalSync
 
 			foreach (var pair in due)
 			{
-				// Sync-eligibility gate (one lookup per customer per tick). Self-host
-				// allows all; an embedding application can install its own gate.
+				// Sync gate, looked up once per owner per tick. The default allows every pair;
+				// hosts that embed the engine can replace it.
 				if (!eligibilityCache.TryGetValue(pair.customerID, out var canSync))
 					eligibilityCache[pair.customerID] = canSync = SyncGate.Current.CanSync(pair.customerID);
-				// A dry-run tick previews; it leaves every schedule and alert exactly as it
-				// found them, or a preview would push the real syncs back an interval.
+				// A dry-run tick leaves schedules and alerts alone, so a preview never delays a
+				// real sync.
 				if (!canSync)
 				{
 					if (!dryRun) pairEntity.updateNextRun(pair.pairID, now.AddSeconds(pair.runIntervalSeconds));
 					continue;
 				}
 
-				// Account health gate: a flagged (needs_reauth) or throttled account
-				// pauses every pair riding on it.
+				// A flagged (needs_reauth) or throttled account pauses every pair that uses it.
 				var gate = AccountGate(pair, accountCache, now);
 				if (gate != null)
 				{
@@ -67,8 +63,8 @@ namespace Core.MTCalSync
 				}
 				catch (Exception ex)
 				{
-					// The engine reports its own failures; this catches scheduler-level
-					// surprises so one pair can't take down the batch.
+					// The engine reports its own failures; this stops a scheduler-level error in
+					// one pair from ending the batch.
 					Common.writeToLog($"ERROR SyncScheduler pair {pair.pairID}:", ex);
 					if (!dryRun) pairEntity.updateNextRun(pair.pairID, DateTime.UtcNow.AddSeconds(pair.runIntervalSeconds));
 				}
@@ -78,7 +74,7 @@ namespace Core.MTCalSync
 			return worst;
 		}
 
-		// Non-null result = when to look at this pair again instead of running it.
+		// Non-null: when to look at this pair again instead of running it now.
 		private static DateTime? AccountGate(SyncPair pair, Dictionary<long, OAuthAccount> cache, DateTime now)
 		{
 			foreach (long connId in new[] { pair.leftConnectionID, pair.rightConnectionID })
@@ -105,8 +101,8 @@ namespace Core.MTCalSync
 
 			if (run != null && run.status == "failed")
 			{
-				// Exponential backoff on repeated failure, capped at an hour. The
-				// counter lives in sync_state (recorded by the engine per side).
+				// Exponential backoff, capped at an hour. The engine records the failure count
+				// per side in sync_state.
 				int failures = MaxConsecutiveFailures(pair);
 				double factor = Math.Pow(2, Math.Clamp(failures, 0, 6));
 				next = now.AddSeconds(Math.Min(interval * factor, 3600)).AddSeconds(Random.Shared.Next(0, 60));
@@ -129,14 +125,15 @@ namespace Core.MTCalSync
 			return worst;
 		}
 
-		// A pair that keeps failing is a user-visible outage: tell the OWNER (not
-		// just the operator) once things look persistent, throttled to one email
-		// per pair per day via sync_pair.lastAlertAt.
+		// A pair that keeps failing is an outage the owner can see, so the owner is told after
+		// this many consecutive failures, at most once per pair per day (sync_pair.lastAlertAt).
+		public const int OwnerAlertAfterFailures = 3;
+
 		private static void MaybeAlertOwnerPersistentFailure(SyncPair pair, SyncRun run)
 		{
 			try
 			{
-				if (MaxConsecutiveFailures(pair) < 3) return;
+				if (MaxConsecutiveFailures(pair) < OwnerAlertAfterFailures) return;
 				if (!new SyncPair().shouldAlert(pair.pairID)) return;
 				OwnerNotifier.Current.PersistentFailure(pair, run);
 			}
