@@ -5,10 +5,10 @@ replay of upstream development history. Changes are described for people running
 which is why there is no per-commit log to read.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project is
-pre-1.0 and does not yet follow semantic versioning - breaking changes will be called out in
+pre-1.0: releases are tagged from 0.1.0 on, and breaking changes are called out in
 their entry.
 
-## [Unreleased]
+## [0.1.0] - 2026-09-29 - the first versioned release
 
 ### Changed
 
