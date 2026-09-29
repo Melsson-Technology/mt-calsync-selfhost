@@ -6,10 +6,9 @@ namespace SelfHost.MTCalSync
 {
 	// Single-tenant auth for the self-host portal. There is exactly one operator, who
 	// owns everything, so tenant lookups collapse to constants — customer 1 / user 1,
-	// always admin (the same identifiers the engine CLI stamps on operator rows). The
-	// hosted (SaaS) portal has its own multi-tenant PortalAuth; this is the self-host
-	// counterpart, kept name- and signature-compatible so the shared controllers copied
-	// from it need no change at their call sites.
+	// always admin (the same identifiers the engine CLI stamps on operator rows). Its
+	// names and signatures match a multi-user portal's PortalAuth, so controllers
+	// shared with one need no change at their call sites.
 	public static class PortalAuth
 	{
 		// The built-in self-host tenant/operator (see the engine's seeded customer 1).

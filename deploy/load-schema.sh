@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# load-schema.sh — apply the MT-CalSync engine schema (engine/Core.MT-CalSync/Sql/NNN_*.sql,
+# load-schema.sh — apply the MT-CalSync engine schema (Core.MT-CalSync/Sql/NNN_*.sql,
 # bundled into worker-publish/sql/ by build-and-package.ps1) in numeric order.
 #
 # Run on the server as root (local MySQL root socket auth):

@@ -6,8 +6,8 @@ using SelfHost.MTCalSync.Models;
 
 namespace SelfHost.MTCalSync.Controllers
 {
-	// /Admin — operator monitoring: fleet-wide pair health, accounts needing
-	// reconnect, open dead letters, and signup/trial counts at a glance.
+	// /Admin — operator monitoring: pair health, accounts needing
+	// reconnect, and open dead letters at a glance.
 	[Authorize(Roles = "Admin")]
 	public class AdminController : Controller
 	{

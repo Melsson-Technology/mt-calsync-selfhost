@@ -16,5 +16,18 @@ namespace Core.MTCalSync
 			OAuthAccountId = oauthAccountId;
 			Provider = provider;
 		}
+
+		// Rethrows the reauth signal if `ex` is one or wraps one. A provider's error
+		// translation calls this first: the token layer raises it from inside a provider
+		// call, and translated into a retryable provider error it never reached the
+		// engine, so the owner was never asked to reconnect.
+		public static void ThrowIfWrapped(Exception ex)
+		{
+			for (Exception? e = ex; e != null; e = e.InnerException)
+				if (e is NeedsReauthException nre)
+					System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(nre).Throw();
+			if (ex is AggregateException agg)
+				foreach (var inner in agg.InnerExceptions) ThrowIfWrapped(inner);
+		}
 	}
 }

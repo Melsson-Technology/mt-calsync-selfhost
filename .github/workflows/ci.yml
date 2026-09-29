@@ -1,0 +1,33 @@
+# Builds the engine with warnings as errors and runs the unit tests on every push to main.
+# The integration checks that drive the whole engine against in-memory calendars need a MySQL
+# database and are not run here.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore MT-CalSync.Engine.sln
+
+      - name: Build with warnings as errors
+        run: dotnet build MT-CalSync.Engine.sln --no-restore -c Release -warnaserror
+
+      - name: Unit tests
+        run: dotnet test Tests.MT-CalSync --no-build -c Release --logger "console;verbosity=normal"

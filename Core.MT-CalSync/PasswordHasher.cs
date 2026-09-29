@@ -39,7 +39,7 @@ namespace Core.MTCalSync
 			return CryptographicOperations.FixedTimeEquals(actual, expected);
 		}
 
-		// Minimal strength gate for signup/reset. Returns an empty string when the
+		// Minimal strength gate for a new password. Returns an empty string when the
 		// password is acceptable, else a user-facing reason.
 		public static string CheckStrength(string password)
 		{

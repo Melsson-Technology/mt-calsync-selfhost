@@ -27,7 +27,7 @@ namespace Core.MTCalSync
 			foreach (var pair in due)
 			{
 				// Sync-eligibility gate (one lookup per customer per tick). Self-host
-				// allows all; the hosted layer installs a subscription-aware gate.
+				// allows all; an embedding application can install its own gate.
 				if (!eligibilityCache.TryGetValue(pair.customerID, out var canSync))
 					eligibilityCache[pair.customerID] = canSync = SyncGate.Current.CanSync(pair.customerID);
 				// A dry-run tick previews; it leaves every schedule and alert exactly as it

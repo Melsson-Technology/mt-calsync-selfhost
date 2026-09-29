@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <!-- Folder/assembly keep the house <Role>.<Product> name; the C# namespace
@@ -12,13 +12,21 @@
 
   <ItemGroup>
     <PackageReference Include="MySql.Data" Version="9.7.0" />
-    <!-- Microsoft Graph v5 (app-only client-credentials) + Azure.Identity for the
-         ClientSecretCredential. Floating within the stable major line so a clean
-         network restore always resolves the latest compatible build. -->
-    <PackageReference Include="Microsoft.Graph" Version="5.*" />
-    <PackageReference Include="Azure.Identity" Version="1.*" />
-    <!-- Google Calendar v3 + service-account auth (domain-wide delegation). Pinned
-         to versions already in the local NuGet cache. -->
+    <!-- Microsoft Graph v5 (delegated and app-only) + Azure.Identity for the
+         ClientSecretCredential. -->
+    <PackageReference Include="Microsoft.Graph" Version="5.105.0" />
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
+    <!-- Microsoft.Graph 5.105.0 pulls in Kiota 1.21.1, whose redirect handler leaks the
+         Cookie and Proxy-Authorization headers across hosts (GHSA-7j59-v9qr-6fq9). The
+         Kiota packages version together, so all of them are raised to the fixed line. -->
+    <PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.22.2" />
+    <PackageReference Include="Microsoft.Kiota.Authentication.Azure" Version="1.22.2" />
+    <PackageReference Include="Microsoft.Kiota.Http.HttpClientLibrary" Version="1.22.2" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Form" Version="1.22.2" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Json" Version="1.22.2" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Multipart" Version="1.22.2" />
+    <PackageReference Include="Microsoft.Kiota.Serialization.Text" Version="1.22.2" />
+    <!-- Google Calendar v3 + OAuth and service-account auth. -->
     <PackageReference Include="Google.Apis.Calendar.v3" Version="1.75.0.4200" />
     <PackageReference Include="Google.Apis.Auth" Version="1.75.0" />
   </ItemGroup>

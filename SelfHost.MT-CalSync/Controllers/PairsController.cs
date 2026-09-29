@@ -103,9 +103,7 @@ namespace SelfHost.MTCalSync.Controllers
 				windowDays = Settings.WindowDays,
 				lookbackDays = Settings.LookbackDays,
 				copyAttendeesToBody = Settings.CopyAttendeesToBody,
-				// The first sync mirrors every in-window event; keep the circuit breaker
-				// above any normal calendar's event count so it doesn't trip on day one.
-				maxWritesPerRun = Math.Max(Settings.MaxWritesPerRun, 500),
+				maxWritesPerRun = Settings.MaxWritesPerRun,   // the first sync has its own allowance
 				fullResyncHour = Settings.FullResyncHour,
 				enabled = true
 			};

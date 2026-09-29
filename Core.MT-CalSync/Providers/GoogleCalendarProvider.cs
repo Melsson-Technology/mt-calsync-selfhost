@@ -180,7 +180,7 @@ namespace Core.MTCalSync
 				var e = evs.Items?.FirstOrDefault();
 				return e == null ? null : ToRemoteEvent(e);
 			}
-			catch (Exception ex) { Common.writeToLog("WARN FindByStampAsync (google): " + ex.Message); return null; }
+			catch (Exception ex) { ThrowIfTransient(ex, "google.FindByStampAsync"); Common.writeToLog("WARN FindByStampAsync (google): " + ex.Message); return null; }
 		}
 
 		public async Task<IReadOnlyList<RemoteEvent>> ListByStampPairAsync(long pairId, int max)
@@ -205,7 +205,7 @@ namespace Core.MTCalSync
 					pageToken = evs.NextPageToken;
 				} while (!string.IsNullOrEmpty(pageToken));
 			}
-			catch (Exception ex) { Common.writeToLog("WARN ListByStampPairAsync (google): " + ex.Message); }
+			catch (Exception ex) { ThrowIfTransient(ex, "google.ListByStampPairAsync"); Common.writeToLog("WARN ListByStampPairAsync (google): " + ex.Message); }
 			return strays;
 		}
 
@@ -222,7 +222,7 @@ namespace Core.MTCalSync
 				var e = evs.Items?.FirstOrDefault();
 				return e == null ? null : ToRemoteEvent(e);
 			}
-			catch (Exception ex) { Common.writeToLog("WARN FindByICalUidAsync (google): " + ex.Message); return null; }
+			catch (Exception ex) { ThrowIfTransient(ex, "google.FindByICalUidAsync"); Common.writeToLog("WARN FindByICalUidAsync (google): " + ex.Message); return null; }
 		}
 
 		// ── writes ──────────────────────────────────────────────────────────
@@ -274,6 +274,7 @@ namespace Core.MTCalSync
 				Description = u.Body,
 				Location = u.Location,
 				Transparency = u.ShowAs == "free" ? "transparent" : "opaque",
+				Visibility = u.IsPrivate ? "private" : "default",
 				Start = ToGoogleDate(u.StartUtc, u.IsAllDay),
 				End = ToGoogleDate(u.EndUtc, u.IsAllDay),
 				// SAFETY: never set Attendees on a mirror event.
@@ -307,6 +308,7 @@ namespace Core.MTCalSync
 				inst.Description = u.Body;
 				inst.Location = u.Location;
 				inst.Transparency = u.ShowAs == "free" ? "transparent" : "opaque";
+				inst.Visibility = u.IsPrivate ? "private" : "default";
 				inst.Start = ToGoogleDate(u.StartUtc, u.IsAllDay);
 				inst.End = ToGoogleDate(u.EndUtc, u.IsAllDay);
 				inst.Status = "confirmed";
@@ -400,11 +402,14 @@ namespace Core.MTCalSync
 			if (string.Equals(e.Transparency, "transparent", StringComparison.OrdinalIgnoreCase)) re.ShowAs = "free";
 			else if (string.Equals(e.Status, "tentative", StringComparison.OrdinalIgnoreCase)) re.ShowAs = "tentative";
 			else re.ShowAs = "busy";
+			re.IsPrivate = string.Equals(e.Visibility, "private", StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(e.Visibility, "confidential", StringComparison.OrdinalIgnoreCase);
 
 			if (!string.IsNullOrEmpty(e.RecurringEventId))
 				re.OccurrenceOriginalStartUtc = e.OriginalStartTime?.DateTimeDateTimeOffset?.UtcDateTime
 					?? (e.OriginalStartTime?.Date != null ? ParseDateOnly(e.OriginalStartTime.Date) : re.StartUtc);
 
+			re.AttendeeCount = e.Attendees?.Count ?? 0;
 			if (e.Attendees != null)
 				foreach (var a in e.Attendees)
 					if (!string.IsNullOrWhiteSpace(a.DisplayName)) re.AttendeeNames.Add(a.DisplayName!);
@@ -422,8 +427,19 @@ namespace Core.MTCalSync
 			return DateTime.TryParse(d, out var dt) ? DateTime.SpecifyKind(dt.Date, DateTimeKind.Utc) : DateTime.MinValue;
 		}
 
+		// The lookups behind match-before-create treat a failure as "not found". That is safe
+		// only for a permanent refusal: after a throttle or an outage, "not found" plans a
+		// create and duplicates an event that exists. So those, and a dead grant, end the run
+		// instead, and the next run looks again.
+		private void ThrowIfTransient(Exception ex, string op)
+		{
+			var pe = Translate(ex, op);
+			if (pe.IsTransient) throw pe;
+		}
+
 		private ProviderException Translate(Exception ex, string op)
 		{
+			NeedsReauthException.ThrowIfWrapped(ex);
 			// Delegated path: a refresh rejected with invalid_grant means the user's
 			// grant is dead (revoked / expired consent) — flag the account and raise
 			// the reauth signal instead of a retryable provider error.

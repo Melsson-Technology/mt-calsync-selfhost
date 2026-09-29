@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Unit tests for the engine's pure logic: nothing here needs a database, a network or a
+       provider account, so they run anywhere, including CI. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Tests.MTCalSync</RootNamespace>
+    <AssemblyName>Tests.MT-CalSync</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Core.MTCalSync" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Core.MT-CalSync\Core.MT-CalSync.csproj" />
+  </ItemGroup>
+
+</Project>

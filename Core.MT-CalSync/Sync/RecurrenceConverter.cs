@@ -7,8 +7,8 @@ namespace Core.MTCalSync
 	// PatternedRecurrence and an RFC 5545 RRULE string (the value Google Calendar
 	// carries in event.Recurrence, minus the "RRULE:" prefix).
 	//
-	// This is the centerpiece of series-preserving (M4) sync and the deepest bug
-	// surface in calendar interop. It is pure logic — fully unit-tested via round-trips.
+	// This is the centerpiece of series-preserving sync and the deepest bug
+	// surface in calendar interop. It is pure logic, so round-trip tests cover it.
 	// Unsupported/exotic patterns return null; callers fall back gracefully.
 	public static class RecurrenceConverter
 	{

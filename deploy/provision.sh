@@ -7,8 +7,9 @@
 #
 #   sudo ./provision.sh
 #
-# Prerequisites (install yourself): the .NET 8 ASP.NET runtime, MySQL 8.0 or later, and
-# nginx (optional). See _docs/INSTALL.md, which covers Ubuntu and Debian.
+# Prerequisites (install yourself): MySQL 8.0 or later, the ASP.NET Core 10 runtime unless the
+# build is self-contained, and nginx (optional). See _docs/INSTALL.md, which covers Ubuntu
+# and Debian.
 #
 # Environment overrides: MTCALSYNC_DB (database name, default mtcalsync), MTCALSYNC_DB_USER
 # (default mtcalsync), MTCALSYNC_DB_PASSWORD (rotates the database password; otherwise the
@@ -171,9 +172,9 @@ systemctl enable mtcalsync-sync.timer mtcalsync-selfhost.service
 
 echo
 echo "Provisioned. Next:"
-echo "  1) Deploy binaries to $APP_HOME (see build-and-package.ps1 + deploy-on-server.sh)."
+echo "  1) Deploy binaries to $APP_HOME (see build-and-package.sh or .ps1, and deploy-on-server.sh)."
 echo "  2) sudo bash $APP_HOME/deploy/load-schema.sh $DB_NAME"
 echo "  3) Set the portal operator login (it prompts; mtcs is the alias in the README):"
-echo "       sudo -u $APP_USER dotnet $APP_HOME/worker-publish/Worker.MT-CalSync.dll set-admin-password"
-echo "  4) systemctl start mtcalsync-selfhost.service && systemctl start mtcalsync-sync.timer"
+echo "       sudo -u $APP_USER $APP_HOME/worker-publish/Worker.MT-CalSync set-admin-password"
+echo "  4) sudo systemctl start mtcalsync-selfhost.service mtcalsync-sync.timer"
 echo "  5) Open the portal, enter your provider credentials in Settings, connect calendars."

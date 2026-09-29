@@ -16,6 +16,18 @@ trap 'rm -rf "$STAGE"' EXIT
 
 tar -xzf "$TARBALL" -C "$STAGE"
 
+# A self-contained build carries the .NET runtime (libcoreclr.so ships only with one). A
+# framework-dependent build needs the ASP.NET Core 10 runtime installed, so check for it
+# before anything is swapped, not after the portal fails to start.
+if [[ -f "$STAGE/selfhost-publish/libcoreclr.so" ]]; then
+    echo "==> self-contained build: no .NET runtime needed on this server"
+elif ! dotnet --list-runtimes 2>/dev/null | grep -q "Microsoft.AspNetCore.App 10\."; then
+    echo "ERROR: this build needs the ASP.NET Core 10 runtime, and it isn't installed." >&2
+    echo "       Install it (_docs/INSTALL.md, step 1), or build self-contained instead:" >&2
+    echo "       ./scripts/build-and-package.sh --self-contained" >&2
+    exit 1
+fi
+
 swap() {   # swap <publish-dir-name>
     local name="$1"
     [[ -d "$STAGE/$name" ]] || return 0
@@ -28,6 +40,19 @@ swap() {   # swap <publish-dir-name>
     fi
 }
 
+# The sync timer is paused for the swap, so no run starts against a half-installed build or
+# a unit that doesn't match it yet. It is restarted at the end only if it was running.
+timer_was_active=0
+systemctl is-active --quiet mtcalsync-sync.timer && timer_was_active=1
+systemctl stop mtcalsync-sync.timer 2>/dev/null || true
+# A run the timer started just before is still going; let it finish (up to ten minutes, the
+# sync lease) before its files move.
+for _ in $(seq 1 600); do
+    case "$(systemctl show -p ActiveState --value mtcalsync-worker@sync.service 2>/dev/null)" in
+        activating|active|deactivating|reloading) sleep 1 ;;
+        *) break ;;
+    esac
+done
 systemctl stop mtcalsync-selfhost.service 2>/dev/null || true
 swap worker-publish
 swap selfhost-publish
@@ -53,9 +78,23 @@ for d in worker-publish selfhost-publish worker-publish.old selfhost-publish.old
     find "$APP_HOME/$d" -type d -exec chmod 0750 {} +
     find "$APP_HOME/$d" -type f -exec chmod 0640 {} +
 done
+# The units run each app's native launcher, which must stay executable. A bundle made on
+# Windows records no execute bit at all.
+for app in worker-publish/Worker.MT-CalSync selfhost-publish/SelfHost.MT-CalSync \
+           worker-publish.old/Worker.MT-CalSync selfhost-publish.old/SelfHost.MT-CalSync; do
+    [[ -f "$APP_HOME/$app" ]] && chmod 0750 "$APP_HOME/$app"
+done
 chown -R root:root "$APP_HOME/deploy" "$APP_HOME/scripts"
 find "$APP_HOME/deploy" "$APP_HOME/scripts" -type d -exec chmod 0755 {} +
 find "$APP_HOME/deploy" "$APP_HOME/scripts" -type f -exec chmod 0644 {} +
 
+# The units come from the bundle on every deploy, so an existing install picks up a changed
+# unit (such as a new ExecStart) instead of keeping the one it was provisioned with.
+for unit in mtcalsync-worker@.service mtcalsync-sync.timer mtcalsync-selfhost.service; do
+    [[ -f "$APP_HOME/deploy/$unit" ]] && install -m0644 "$APP_HOME/deploy/$unit" /etc/systemd/system/
+done
+systemctl daemon-reload
+
 systemctl start mtcalsync-selfhost.service
+[[ $timer_was_active -eq 1 ]] && systemctl start mtcalsync-sync.timer
 echo "Deployed. worker + self-host portal swapped; previous kept as *.old."

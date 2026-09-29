@@ -39,6 +39,7 @@ namespace Core.MTCalSync
 		// ── side accessors ───────────────────────────────────────────────────
 		public string EventIdForSide(string side) => side == Providers.M365 ? leftEventId : rightEventId;
 		public string EtagForSide(string side) => side == Providers.M365 ? leftEtag : rightEtag;
+		public string ICalUidForSide(string side) => side == Providers.M365 ? leftICalUid : rightICalUid;
 		public string MirrorSide => Providers.Other(originProvider);
 		public string MirrorEventId => EventIdForSide(MirrorSide);
 
@@ -119,7 +120,7 @@ namespace Core.MTCalSync
 		// pair's MIRROR on `side` (its originProvider is the OTHER side). This is how we
 		// recognise an event that another pair wrote into a SHARED destination calendar,
 		// so a pair polling that calendar never re-mirrors a sibling pair's mirror.
-		// Requires idx_map_left_key / idx_map_right_key (migration 003) to be index-served.
+		// Requires idx_map_left_key / idx_map_right_key (in 001_schema.sql) to be index-served.
 		public bool isMirrorInAnotherPair(long thisPairId, string side, string eventKey)
 		{
 			if (string.IsNullOrEmpty(eventKey)) return false;

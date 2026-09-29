@@ -29,7 +29,7 @@ namespace SelfHost.MTCalSync.Controllers
 			string hash = Settings.SelfHostAdminPasswordHash;
 			if (string.IsNullOrWhiteSpace(hash))
 			{
-				ViewBag.Error = "No operator password is set yet. On the server run:  mtcs set-admin-password --password <value>";
+				ViewBag.Error = "No operator password is set yet. On the server run:  mtcs set-admin-password  (it prompts for the password)";
 				return View();
 			}
 			if (string.IsNullOrEmpty(password) || !PasswordHasher.Verify(password, hash))

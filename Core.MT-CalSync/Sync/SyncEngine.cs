@@ -41,6 +41,25 @@ namespace Core.MTCalSync
 		private readonly Dictionary<string, ICalendarProvider> _providers = new();
 		private readonly EventMapping _map = new();
 		private readonly DeadLetter _dl = new();
+		private readonly List<EventMapping> _deferredMappings = new();
+
+		// How many changes a pair's first sync may make. It mirrors every event already in the
+		// window, so the ordinary limit would stop it.
+		public const int FirstSyncAllowance = 500;
+
+		// Classification also runs in a dry run and before the circuit breaker, so it never
+		// saves a mapping itself: it queues it here, and Run saves the queue once the breaker
+		// has passed.
+		private void Defer(EventMapping m) { if (!_deferredMappings.Contains(m)) _deferredMappings.Add(m); }
+
+		// What the circuit breaker counts as one change: the origin event, or for an occurrence
+		// the series it belongs to.
+		private static string ChangeKey(SyncOp o)
+		{
+			if (o.IsInstanceOp) return o.SrcSide + "|series|" + o.OriginMasterId;
+			string series = o.Unit?.OriginSeriesKey ?? o.Mapping?.originSeriesKey ?? string.Empty;
+			return string.IsNullOrEmpty(series) ? o.SrcSide + "|" + o.SourceId : o.SrcSide + "|series|" + series;
+		}
 
 		public SyncEngine(SyncPair pair, bool dryRun = false, bool force = false, bool fullResync = false)
 		{
@@ -129,8 +148,15 @@ namespace Core.MTCalSync
 				// exception's mirror master must exist first (stable sort preserves order).
 				ops = ops.OrderBy(o => o.IsInstanceOp ? 1 : 0).ToList();
 
-				int destructive = ops.Count(o => o.Kind == OpKind.Create || o.Kind == OpKind.Delete || o.Kind == OpKind.InstanceCancel);
-				bool overBreaker = destructive > _pair.maxWritesPerRun && !_force;
+				// The breaker counts every planned write, updates included, with the
+				// occurrences of one recurring series counted once: adding a weekly meeting in
+				// instance mode plans a create per week, and that is one change, not nine. A
+				// pair's first sync, before it has any mirrors, may create up to
+				// FirstSyncAllowance; after that the pair's own limit applies.
+				int planned = ops.Select(ChangeKey).Distinct().Count();
+				bool firstSync = _map.countActive(_pair.pairID) == 0;
+				int limit = firstSync ? Math.Max(_pair.maxWritesPerRun, FirstSyncAllowance) : _pair.maxWritesPerRun;
+				bool overBreaker = planned > limit && !_force;
 
 				// ── dry run: show the plan, touch nothing ────────────────────
 				// Ahead of the circuit breaker on purpose. A preview is how an operator
@@ -146,7 +172,7 @@ namespace Core.MTCalSync
 						Console.WriteLine($"  {o.Kind,-14} {o.SrcSide}->{o.DstSide}  {label}  start={when}");
 					}
 					if (overBreaker)
-						Console.WriteLine($"Note: {destructive} create/delete ops exceed maxWritesPerRun={_pair.maxWritesPerRun}, so a live run " +
+						Console.WriteLine($"Note: {planned} planned changes exceed the limit of {limit}, so a live run " +
 							$"would stop at the circuit breaker and apply nothing. If this is expected, run `sync --pair {_pair.pairID} --force` once.");
 					run.finish("success");
 					return run;
@@ -155,14 +181,20 @@ namespace Core.MTCalSync
 				// ── circuit breaker ──────────────────────────────────────────
 				if (overBreaker)
 				{
-					string msg = $"Circuit breaker: {destructive} create/delete ops exceed maxWritesPerRun={_pair.maxWritesPerRun}. " +
-								 "Nothing applied. Re-run with --force if this is expected.";
-					Common.audit($"pair={_pair.pairID} op=circuit-breaker planned={destructive} result=aborted");
+					string msg = $"Circuit breaker: {planned} planned changes exceed the limit of {limit}. Nothing was applied, " +
+								 "and the next run will stop here too while the changes are still pending. " +
+								 $"Preview them with `sync --pair {_pair.pairID} --dry-run`; if they are expected, apply them once with " +
+								 $"`sync --pair {_pair.pairID} --force`.";
+					Common.audit($"pair={_pair.pairID} op=circuit-breaker planned={planned} limit={limit} result=aborted");
 					run.errorText = msg; run.finish("aborted_circuit_breaker");
 					if (new SyncPair().shouldAlert(_pair.pairID))
 						Email.SendAlert($"MT-CalSync circuit breaker (pair {_pair.pairID})", msg + "\n\n" + run.Summary());
 					return run;
 				}
+
+				// Mapping changes that classification decided on (adoptions and re-keys) are
+				// saved only now, so a run the breaker stops leaves the database as it found it.
+				foreach (var m in _deferredMappings) m.save();   // a dry run returned above, so it saves none
 
 				// ── apply ────────────────────────────────────────────────────
 				foreach (var op in ops) await ApplyWithRetry(op, run);
@@ -348,7 +380,10 @@ namespace Core.MTCalSync
 			if (_pair.SeriesMode && c.IsRecurringInstance)
 				return ClassifyException(side, c, run);
 
-			var m = _map.findBySideKey(_pair.pairID, side, Common.Sha256Hex(c.Id));
+			// A mapping queued earlier in this run counts: the other side may already have linked
+			// this event.
+			var m = _map.findBySideKey(_pair.pairID, side, Common.Sha256Hex(c.Id))
+				?? _deferredMappings.FirstOrDefault(d => d.EventIdForSide(side) == c.Id);
 
 			// A tombstoned mapping is finished with: its mirror was deleted, or a teardown chose to
 			// keep it. Seeing the deletion again changes nothing. Without this, every full list that
@@ -371,7 +406,7 @@ namespace Core.MTCalSync
 					Common.audit($"pair={_pair.pairID} op=rekey side={side} mapping={churned.mappingID} " +
 						$"oldId={churned.EventIdForSide(side)} newId={c.Id} uid={c.ICalUid} result=ok");
 					churned.SetSide(side, c.Id, c.ICalUid, c.Etag);
-					if (!_dryRun) churned.save();   // classification runs in a dry run too; it must not write
+					Defer(churned);
 					run.adoptedCount++;
 					m = churned;
 				}
@@ -428,7 +463,7 @@ namespace Core.MTCalSync
 				var adopted = BuildMapping(side, c, dst, existing, u);
 				adopted.projectedHash = existing.Stamp.Managed ? existing.Stamp.Hash : u.Hash;
 				adopted.mirrorVersion = existing.Stamp.Version;
-				if (!_dryRun) adopted.save();
+				Defer(adopted);
 				run.adoptedCount++;
 				if (u.Hash != adopted.projectedHash)
 					return new SyncOp { Kind = OpKind.Update, SrcSide = side, DstSide = dst, SourceId = c.Id, Unit = u, Source = c, Mapping = adopted };
@@ -497,7 +532,7 @@ namespace Core.MTCalSync
 					mirrorVersion = c.Stamp.Version
 				};
 				rebuilt.SetSide(side, c.Id, c.ICalUid, c.Etag);   // the mirror side
-				if (!_dryRun) rebuilt.save();
+				Defer(rebuilt);
 				run.adoptedCount++; run.echoSkippedCount++;
 				return null;
 			}
@@ -548,6 +583,9 @@ namespace Core.MTCalSync
 					int delay = pe.RetryAfterSeconds ?? (int)Math.Pow(2, attempts);
 					await Task.Delay(Math.Min(30, Math.Max(1, delay)) * 1000);
 				}
+				// A dead grant fails every remaining op the same way. Let it end the run as
+				// skipped_auth, which asks the owner to reconnect, rather than dead-letter each op.
+				catch (NeedsReauthException) { throw; }
 				catch (Exception ex)
 				{
 					_dl.record(_pair.pairID, op.SrcSide, op.SourceId, op.Kind.ToString().ToLower(), op.Unit?.Subject ?? string.Empty, "unhandled", ex.Message);
@@ -591,6 +629,17 @@ namespace Core.MTCalSync
 					var m = op.Mapping!;
 					long version = m.mirrorVersion + 1;
 					string mirrorId = m.EventIdForSide(op.DstSide);
+					var live = await dst.GetAsync(mirrorId);
+					if (live != null && MirrorGuard.RefusalReason(live, m.ICalUidForSide(op.SrcSide)) is { } why)
+					{
+						// Remember the origin's new content so the refusal isn't re-planned every run.
+						m.SetSide(op.SrcSide, op.Source!.Id, op.Source.ICalUid, op.Source.Etag);
+						m.projectedHash = op.Unit!.Hash; m.originContentHash = op.Unit.Hash;
+						m.save();
+						run.skippedCount++;
+						Common.audit($"pair={_pair.pairID} op=update side={op.DstSide} origin={op.SrcSide} oid={op.SourceId} mirror={mirrorId} result=refused reason=\"{why}\"");
+						break;
+					}
 					var refr = await dst.UpdateAsync(mirrorId, m.EtagForSide(op.DstSide), op.Unit!, _pair.pairID, version);
 					m.SetSide(op.DstSide, refr.Id, refr.ICalUid, refr.Etag);
 					m.SetSide(op.SrcSide, op.Source!.Id, op.Source.ICalUid, op.Source.Etag);
@@ -605,7 +654,16 @@ namespace Core.MTCalSync
 				{
 					var m = op.Mapping!;
 					string mirrorId = m.EventIdForSide(op.DstSide);
-					if (!string.IsNullOrEmpty(mirrorId))
+					var live = string.IsNullOrEmpty(mirrorId) ? null : await dst.GetAsync(mirrorId);
+					if (live != null && MirrorGuard.RefusalReason(live, m.ICalUidForSide(op.SrcSide)) is { } why)
+					{
+						// Unlink without deleting: the other event stays where it is.
+						m.tombstone();
+						run.skippedCount++;
+						Common.audit($"pair={_pair.pairID} op=delete side={op.DstSide} origin={op.SrcSide} oid={op.SourceId} mirror={mirrorId} result=refused reason=\"{why}\"");
+						break;
+					}
+					if (live != null && !live.IsDeleted)
 						await dst.DeleteAsync(mirrorId, m.EtagForSide(op.DstSide));
 					m.tombstone();
 					run.deletedCount++;
@@ -619,6 +677,7 @@ namespace Core.MTCalSync
 					string mirrorMasterId = MirrorMasterId(op.SrcSide, op.DstSide, op.OriginMasterId);
 					if (string.IsNullOrEmpty(mirrorMasterId))
 						throw new ProviderException("exception: series master not mapped yet", "no-master", false);
+					if (await RefuseSeriesWrite(dst, mirrorMasterId, op, run)) break;
 					long version = (op.Mapping?.mirrorVersion ?? 0) + 1;
 					var refr = await dst.UpsertInstanceAsync(mirrorMasterId, op.OrigStartUtc, op.Unit!, _pair.pairID, version);
 					var em = op.Mapping ?? new EventMapping
@@ -638,6 +697,7 @@ namespace Core.MTCalSync
 				case OpKind.InstanceCancel:
 				{
 					string mirrorMasterId = MirrorMasterId(op.SrcSide, op.DstSide, op.OriginMasterId);
+					if (!string.IsNullOrEmpty(mirrorMasterId) && await RefuseSeriesWrite(dst, mirrorMasterId, op, run)) break;
 					if (!string.IsNullOrEmpty(mirrorMasterId))
 						await dst.CancelInstanceAsync(mirrorMasterId, op.OrigStartUtc);
 					_map.findByOccurrence(_pair.pairID, op.SrcSide, op.OriginMasterId, op.OrigStartUtc)?.tombstone();
@@ -653,6 +713,16 @@ namespace Core.MTCalSync
 		{
 			var masterMap = _map.findBySideKey(_pair.pairID, srcSide, Common.Sha256Hex(originMasterId));
 			return masterMap?.EventIdForSide(dstSide) ?? string.Empty;
+		}
+
+		// An occurrence is changed through its series master, so the master must be our mirror.
+		private async Task<bool> RefuseSeriesWrite(ICalendarProvider dst, string mirrorMasterId, SyncOp op, SyncRun run)
+		{
+			var master = await dst.GetAsync(mirrorMasterId);
+			if (master == null || MirrorGuard.RefusalReason(master) is not { } why) return false;
+			run.skippedCount++;
+			Common.audit($"pair={_pair.pairID} op={op.Kind.ToString().ToLower()} side={op.DstSide} origin={op.SrcSide} master={mirrorMasterId} origStart={op.OrigStartUtc:u} result=refused reason=\"{why}\"");
+			return true;
 		}
 	}
 }

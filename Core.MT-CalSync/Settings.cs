@@ -27,37 +27,10 @@ namespace Core.MTCalSync
 			try { oXML.Load(candidatePath); }
 			catch (Exception ex) { Common.writeToLog("WARN: could not load settings.xml (" + candidatePath + ")", ex); return settings; }
 
-			string[] keys = {
-				// Database + crypto bootstrap (settings.xml only)
-				"MySqlDatabaseConnection", "DataEncryptionKey", "DataProtectionKeysPath",
-				// Legacy single-admin portal login (superseded by the user table)
-				"PortalAdminUser", "PortalAdminPassword",
-			// Self-host operator login (single hashed password; hosted uses the user table)
-			"SelfHostAdminPasswordHash",
-				// Microsoft 365 / Graph (app-only client credentials)
-				"GraphTenantId", "GraphClientId", "GraphClientSecret",
-				// Google Workspace (service account + domain-wide delegation)
-				"GoogleServiceAccountJsonPath", "GoogleServiceAccountJson",
-				// Delegated OAuth app clients (user connect flows)
-				"MsOAuthClientId", "MsOAuthClientSecret",
-				"GoogleOAuthClientId", "GoogleOAuthClientSecret", "UnverifiedAppNotice",
-				// Sync defaults (per-pair values in sync_pair override these)
-				"WindowDays", "LookbackDays", "FidelityMode", "CopyAttendeesToBody",
-				"MaxWritesPerRun", "FullResyncHour", "MaxDeltaPages",
-				// Worker / billing (the plan's own numbers are constants, not settings — see Plan.cs)
-				"PublicBaseUrl", "WorkerMaxConcurrency",
-				"StripePublishableKey", "StripeSecretKey", "AbandonedTrialRetentionDays",
-				// Provenance stamp namespace + this app's instance id
-				"ExtPropNamespaceGuid", "AppInstanceId",
-				// SMTP (failure alerts)
-				"SmtpHost", "SmtpPort", "SmtpUseSsl", "SmtpUser", "SmtpPassword",
-				"SmtpFrom", "AlertTo"
-			};
-			foreach (var key in keys)
-			{
-				var node = oXML.SelectSingleNode("//" + key);
-				if (node != null) settings[key] = node.InnerText;
-			}
+			// Every element is read, so an application built on the engine can keep its own
+			// keys in the same file and read them through Resolve and ResolveSecret.
+			foreach (XmlNode node in oXML.SelectNodes("//*[not(*)]")!)
+				settings[node.Name] = node.InnerText;
 			return settings;
 		}
 
@@ -89,15 +62,10 @@ namespace Core.MTCalSync
 			}
 		}
 
-		// ─── Legacy single-admin portal login (pre-user-table; kept only so the
-		//     break-glass CLI docs stay accurate) ────────────────────────────
-		// Single PBKDF2 password hash for the self-host portal's one operator (set with
-		// the `set-admin-password` worker command). The hosted portal uses the user
-		// table instead; this key is read only by the self-host portal.
+		// ─── Portal operator login ──────────────────────────────────────────
+		// The PBKDF2 hash of the portal operator's password, set with the
+		// `set-admin-password` worker command.
 		public static string SelfHostAdminPasswordHash => resolveRaw("SelfHostAdminPasswordHash");
-
-		public static string PortalAdminUser => GetCachedSetting("PortalAdminUser");
-		public static string PortalAdminPassword => GetCachedSetting("PortalAdminPassword");
 
 		// Web-editable config below resolves DB-first (the Portal writes it there) with
 		// an XML fallback, so the admin UI is the source of truth without redeploying.
@@ -148,18 +116,9 @@ namespace Core.MTCalSync
 		public static int MaxDeltaPages => (int)parseDecimal(resolveRaw("MaxDeltaPages"), 50m);
 
 		// ─── Worker ─────────────────────────────────────────────────────────
-		// Trial length, plan price and the calendar allowance are deliberately NOT
-		// settings. They are compile-time facts in the SaaS layer's Plan.cs, because
-		// changing one also changes marketing prose that no settings row can reach.
-		// Concurrent pair runs per worker tick — sized to the box, not the tenant count.
+		// Concurrent pair runs per worker tick, sized to the box.
 		public static int WorkerMaxConcurrency => (int)parseDecimal(resolveRaw("WorkerMaxConcurrency"), 2m);
 
-		// ─── Billing (Stripe) ───────────────────────────────────────────────
-		public static string StripePublishableKey => resolveRaw("StripePublishableKey");
-		public static string EffectiveStripeSecretKey => resolveKey("StripeSecretKey", GetCachedSetting("StripeSecretKey"));
-		// Days after an unconverted trial's end before stored OAuth tokens are
-		// revoked/deleted (holding live credentials for abandoned trials is pure risk).
-		public static int AbandonedTrialRetentionDays => (int)parseDecimal(resolveRaw("AbandonedTrialRetentionDays"), 30m);
 		// Absolute origin for links in outbound email (reset links etc.), no trailing slash.
 		public static string PublicBaseUrl => resolveRaw("PublicBaseUrl").TrimEnd('/');
 
@@ -170,16 +129,9 @@ namespace Core.MTCalSync
 			withDefault(GetCachedSetting("ExtPropNamespaceGuid"), "b7c9e3a2-6d41-4f8b-9c2e-a1b2c3d4e5f6");
 		public static string AppInstanceId => withDefault(GetCachedSetting("AppInstanceId"), "mt-calsync");
 
-		// ─── Branding (email + public copy) ─────────────────────────────────
-		// All overridable via the settings table so a self-hoster rebrands the
-		// whole product without touching code. Defaults derive from each other
-		// (signature/support follow AppName / SmtpFrom), so setting AppName alone
-		// carries most of the way. CompanyName/Address feed the CAN-SPAM footer.
+		// ─── Branding ───────────────────────────────────────────────────────
+		// The product name in alert emails; overridable in the settings table.
 		public static string AppName => withDefault(resolveRaw("AppName"), "MT-CalSync");
-		public static string SupportEmail => withDefault(resolveRaw("SupportEmail"), SmtpFrom);
-		public static string EmailSignature => withDefault(resolveRaw("EmailSignature"), "The " + AppName + " team");
-		public static string CompanyName => resolveRaw("CompanyName");        // blank ok
-		public static string CompanyAddress => resolveRaw("CompanyAddress");  // blank until public launch
 
 		// ─── SMTP ───────────────────────────────────────────────────────────
 		public static string SmtpHost => resolveRaw("SmtpHost");
@@ -220,6 +172,11 @@ namespace Core.MTCalSync
 				return string.Empty;
 			}
 		}
+
+		// For settings the engine itself doesn't define: a plain value, and a secret stored
+		// encrypted. Both read the database first, then settings.xml.
+		public static string Resolve(string name) => resolveRaw(name);
+		public static string ResolveSecret(string name) => resolveKey(name, GetCachedSetting(name));
 
 		// DB (plaintext) → XML fallback, for non-secret web-editable config. The Portal
 		// writes these into the settings table, so a UI edit takes effect immediately.

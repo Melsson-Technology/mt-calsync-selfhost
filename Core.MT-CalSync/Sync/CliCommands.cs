@@ -30,7 +30,7 @@ namespace Core.MTCalSync
 
 			var pair = new SyncPair
 			{
-				// Operator pairs belong to the built-in default customer (free forever);
+				// Operator pairs belong to the built-in default customer, id 1;
 				// bootstrap-admin claims the userID.
 				customerID = 1,
 				name = string.IsNullOrWhiteSpace(name) ? $"{m365Email} <-> {googleEmail}" : name,
@@ -110,7 +110,7 @@ namespace Core.MTCalSync
 
 			var pair = new SyncPair
 			{
-				customerID = 1,   // operator feature — default customer, free forever
+				customerID = 1,   // the built-in default customer
 				name = "Shared: " + label,
 				leftConnectionID = leftId,
 				rightConnectionID = rightId,
@@ -120,9 +120,7 @@ namespace Core.MTCalSync
 				windowDays = Settings.WindowDays,
 				lookbackDays = Settings.LookbackDays,
 				copyAttendeesToBody = Settings.CopyAttendeesToBody,
-				// First sync creates one event per in-window occurrence; lift the circuit
-				// breaker well above the default 25 so a normal shared calendar won't trip it.
-				maxWritesPerRun = Math.Max(Settings.MaxWritesPerRun, 500),
+				maxWritesPerRun = Settings.MaxWritesPerRun,   // the first sync has its own allowance
 				fullResyncHour = Settings.FullResyncHour,
 				enabled = true
 			};
@@ -149,9 +147,9 @@ namespace Core.MTCalSync
 		// each remote mirror (idempotent on 404) → delete the pair row → drop
 		// now-unreferenced connections on both sides.
 		//
-		// STAMP GUARD: only events carrying OUR provenance stamp for this pair are
-		// deleted. A mapping can link two REAL events (adopted external invites) —
-		// its "mirror side" is a native event the user owns, and it must survive.
+		// Only this pair's own mirrors are deleted (stamped for the pair and passing
+		// MirrorGuard). A mapping can link two real copies of one meeting, and the
+		// user's copy must survive.
 		public static async Task<TeardownResult> TeardownPair(long pairId, bool alsoDeleteGoogleConnection = true)
 		{
 			var r = new TeardownResult { PairId = pairId };
@@ -193,14 +191,14 @@ namespace Core.MTCalSync
 							{
 								// already gone remotely — nothing to delete
 							}
-							else if (ev.Stamp.Managed && ev.Stamp.PairId == pairId)
+							else if (ev.Stamp.PairId == pairId && MirrorGuard.RefusalReason(ev, m.ICalUidForSide(m.originProvider)) == null)
 							{
 								await prov.DeleteAsync(mirrorId, m.EtagForSide(mirrorSide));
 								r.Deleted++;
 							}
 							else
 							{
-								keptReal++;   // adopted native event — never ours to delete
+								keptReal++;   // someone's real event, never ours to delete
 							}
 						}
 						catch (Exception ex) { r.Failed++; Common.writeToLog($"teardown pair={pairId} side={mirrorSide} mirror={mirrorId}:", ex); }
@@ -284,9 +282,43 @@ namespace Core.MTCalSync
 			}
 		}
 
-		// Operator cleanup: delete a MANAGED mirror event and tombstone its mapping. Guarded
-		// — refuses unless the event carries OUR provenance stamp for this pair, so it can
-		// never delete a real/native event. Used to clear stray duplicates.
+		// Read-only: fetch the event on the far side of every active mapping and report which ones
+		// the sync would refuse to update or delete, and why. Run it before and after a deploy that
+		// touches the write paths.
+		public static async Task GuardAudit(long pairId)
+		{
+			var pair = new SyncPair().getById(pairId);
+			if (pair.pairID == 0) { Console.WriteLine($"No sync pair {pairId}."); return; }
+			var providers = new Dictionary<string, ICalendarProvider>();
+			ICalendarProvider ProviderFor(string side) =>
+				providers.TryGetValue(side, out var p) ? p
+				: providers[side] = ProviderFactory.Create(
+					new ProviderConnection().getById(side == Providers.M365 ? pair.leftConnectionID : pair.rightConnectionID),
+					pair.SeriesMode);
+
+			int writable = 0, gone = 0, failed = 0;
+			var refused = new Dictionary<string, int>();
+			foreach (var m in new EventMapping().listByPair(pairId))
+			{
+				string mirrorId = m.MirrorEventId;
+				if (string.IsNullOrEmpty(mirrorId)) { gone++; continue; }
+				try
+				{
+					var ev = await ProviderFor(m.MirrorSide).GetAsync(mirrorId);
+					if (ev == null || ev.IsDeleted) { gone++; continue; }
+					string? why = MirrorGuard.RefusalReason(ev, m.ICalUidForSide(m.originProvider));
+					if (why == null) { writable++; continue; }
+					refused[why] = refused.GetValueOrDefault(why) + 1;
+					Console.WriteLine($"  refused  mapping {m.mappingID}  {m.MirrorSide} {Trunc(mirrorId)}  {why}  (stamp pair {ev.Stamp.PairId}, attendees {ev.AttendeeCount})");
+				}
+				catch (Exception ex) { failed++; Console.WriteLine($"  error    mapping {m.mappingID}: {ex.Message}"); }
+			}
+			Console.WriteLine($"Pair {pairId}: {writable} mirror(s) writable, {refused.Values.Sum()} refused, {gone} gone, {failed} unreadable.");
+			foreach (var kv in refused) Console.WriteLine($"  {kv.Value} × {kv.Key}");
+		}
+
+		// Operator cleanup: delete one mirror event and tombstone its mapping. Refuses anything
+		// that is not this pair's own mirror (see MirrorGuard). Used to clear stray duplicates.
 		public static async Task PurgeMirror(long pairId, string provider, string eventId)
 		{
 			var pair = new SyncPair().getById(pairId);
@@ -298,10 +330,10 @@ namespace Core.MTCalSync
 			var prov = ProviderFactory.Create(conn, pair.SeriesMode);
 			var ev = await prov.GetAsync(eventId);
 			if (ev == null) { Console.WriteLine($"Event {eventId} not found on {provider} (already gone?)."); return; }
-			if (!ev.Stamp.Managed || ev.Stamp.PairId != pairId)
+			string? why = ev.Stamp.PairId != pairId ? $"not stamped for pair {pairId}" : MirrorGuard.RefusalReason(ev);
+			if (why != null)
 			{
-				Console.WriteLine($"REFUSED: {provider} event \"{ev.Subject}\" is not a managed mirror of pair {pairId} " +
-					$"(managed={ev.Stamp.Managed} pair={ev.Stamp.PairId}). Nothing deleted.");
+				Console.WriteLine($"REFUSED: {provider} event \"{ev.Subject}\" is not a mirror of pair {pairId} ({why}). Nothing deleted.");
 				return;
 			}
 			await prov.DeleteAsync(eventId, ev.Etag);
@@ -371,6 +403,16 @@ namespace Core.MTCalSync
 		{
 			bool ok = new SyncPair().getById(pairId).pairID != 0 && new SyncPair().setEnabled(pairId, !paused);
 			Console.WriteLine(ok ? $"Pair {pairId} {(paused ? "paused" : "resumed")}." : $"Pair {pairId} not found.");
+			return ok;
+		}
+
+		// The circuit breaker's limit for one pair: how many changes one run may make before
+		// it stops and applies nothing.
+		public static bool SetMaxWrites(long pairId, long max)
+		{
+			if (max < 1) { Console.WriteLine("Give the limit as a positive number, for example --max 25."); return false; }
+			bool ok = new SyncPair().getById(pairId).pairID != 0 && new SyncPair().setMaxWritesPerRun(pairId, (int)max);
+			Console.WriteLine(ok ? $"Pair {pairId} may now make up to {max} changes per run." : $"Pair {pairId} not found.");
 			return ok;
 		}
 
@@ -476,14 +518,14 @@ namespace Core.MTCalSync
 					try
 					{
 						var mir = string.IsNullOrEmpty(m.MirrorEventId) ? null : await ProviderFor(m.MirrorSide).GetAsync(m.MirrorEventId);
-						if (mir != null && mir.Stamp.Managed && mir.Stamp.PairId == pairId)
+						if (mir != null && mir.Stamp.PairId == pairId && MirrorGuard.RefusalReason(mir) == null)
 						{ await ProviderFor(m.MirrorSide).DeleteAsync(m.MirrorEventId, m.EtagForSide(m.MirrorSide)); mirrorsDeleted++; }
 					}
 					catch (Exception ex) { Common.writeToLog($"repair-chains pair={pairId} del mirror {m.MirrorEventId}:", ex); }
 
 					// 2) the fake origin itself — only when its stamp names a pair that
 					//    no longer exists (never touch another LIVE pair's mirror)
-					if (originPairDead)
+					if (originPairDead && MirrorGuard.RefusalReason(origin) == null)
 					{
 						try { await ProviderFor(originSide).DeleteAsync(originId, m.EtagForSide(originSide)); fakeOriginsDeleted++; }
 						catch (Exception ex) { Common.writeToLog($"repair-chains pair={pairId} del fake origin {originId}:", ex); }
@@ -502,7 +544,7 @@ namespace Core.MTCalSync
 		private static string Trunc(string s) => s.Length <= 20 ? s : s[..20] + "…";
 
 		// Delete stray mirrors left behind by a pair whose teardown could not finish
-		// (the failure class behind the 2026-07-23 StampExpand bug): events in the
+		// (for example, one interrupted part-way through): events in the
 		// LIVE pair's two calendars stamped as belonging to a pair that no longer
 		// exists. Triple-guarded — the stamp must be managed, must name the dead
 		// pair, and the event must not sit inside any live mapping (adopted mirrors
@@ -529,7 +571,7 @@ namespace Core.MTCalSync
 					foreach (var ev in strays)
 					{
 						scanned++;
-						if (!ev.Stamp.Managed || ev.Stamp.PairId != deadPairId) continue;
+						if (ev.Stamp.PairId != deadPairId || MirrorGuard.RefusalReason(ev) != null) continue;
 						if (mapModel.existsActiveForSide(side, ev.Id)) { keptMapped++; continue; }
 						try
 						{

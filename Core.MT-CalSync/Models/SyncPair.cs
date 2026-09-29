@@ -104,6 +104,13 @@ namespace Core.MTCalSync
 			return oDA.updateData("update sync_pair set enabled = @e where pairID = @id", p);
 		}
 
+		public bool setMaxWritesPerRun(long id, int value)
+		{
+			var oDA = new DataAccess();
+			var p = new Dictionary<string, object> { { "@m", value }, { "@id", id } };
+			return oDA.updateData("update sync_pair set maxWritesPerRun = @m where pairID = @id", p);
+		}
+
 		// Pairs the scheduler should consider this tick.
 		public List<SyncPair> listDue()
 		{

@@ -8,6 +8,81 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Thi
 pre-1.0 and does not yet follow semantic versioning - breaking changes will be called out in
 their entry.
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking: MT-CalSync now runs on .NET 10.** .NET 8 reaches the end of its support on
+  2026-11-10. Build with the .NET 10 SDK, and on the server either install the ASP.NET Core
+  10 runtime (`_docs/INSTALL.md`, step 1, which explains how to check first that it won't
+  remove the .NET 8 host other applications use), or build with `--self-contained` so the
+  server needs no runtime at all. `deploy-on-server.sh` refuses a framework-dependent build
+  on a server without the runtime, before it changes anything. **To upgrade, unpack the new
+  bundle and run its own `deploy/deploy-on-server.sh`**, not the copy under
+  `/opt/mtcalsync/deploy`: the previous release's script neither checks for the runtime nor
+  updates the units, and the portal then fails to start.
+- The systemd units run each application's own launcher instead of `dotnet <app>.dll`, and
+  `deploy-on-server.sh` now reinstalls them on every deploy (and waits for a sync run in
+  progress before swapping the build), so an existing install picks
+  the change up. The `mtcs` alias in the README changes to match:
+  `alias mtcs='sudo -u mtcalsync /opt/mtcalsync/worker-publish/Worker.MT-CalSync'`.
+- The build no longer needs PowerShell: `scripts/build-and-package.sh` does what the `.ps1`
+  does, and both take a self-contained option.
+
+### Security
+
+- Raised the Microsoft Kiota libraries under Microsoft Graph to 1.22.2. The 1.21.1 that
+  Microsoft.Graph 5.105.0 pulls in forwards Cookie and Proxy-Authorization headers across
+  hosts on a redirect (GHSA-7j59-v9qr-6fq9).
+
+### Fixed
+
+- **The sync could rewrite or delete someone's real meeting.** When the same meeting sat on
+  both calendars (a cross-invite: your Outlook meeting with your Gmail address invited), the
+  engine linked the two copies and later wrote to the other copy as if it were its own mirror.
+  An edit could strip the meeting's guests, and deleting or declining one copy could delete
+  the other and cancel it for every attendee. The engine now updates or deletes only events it
+  created: stamped by MT-CalSync, with no attendees, and not sharing the origin meeting's
+  iCalUID. Everything else is left alone, and the refusal is written to the audit log. Removing
+  a pair and the cleanup commands (`purge-mirror`, `repair-chains`, `sweep-strays`) apply the
+  same rule.
+- **Private events were copied as ordinary events.** An appointment marked Private in Outlook
+  (or private in Google) arrived on the other calendar as a normal event, title and notes
+  included, visible to anyone that calendar is shared with. Mirrors of private events are now
+  written private, and marking or unmarking an event later updates its mirror. The first run
+  on this release updates the mirrors of events that are already private; nothing else is
+  rewritten.
+- **The circuit breaker didn't guard most runs.** Pairs created in the portal's wizard or on
+  the Shared calendars page stored a limit of 500, and only creates and deletes were counted.
+  Now every planned write counts, updates included, with the occurrences of one recurring
+  series counted once; a pair's first sync may make up to 500 changes; and new pairs get the
+  ordinary limit of 25. Links made while planning a stopped run are no longer saved.
+  **Existing pairs keep the limit they stored.** List them with `list-pairs`
+  (`maxWrites/run=500`) and lower each with `set-max-writes --pair N --max 25`.
+- **A revoked Microsoft grant never asked the owner to reconnect.** The token refusal arrived
+  from inside a Graph call and was treated as a passing network error, so the pair backed off
+  and retried quietly for good. It now ends the run as `skipped_auth`, flags the account and
+  sends the reconnect email. A Google grant revoked part-way through a run no longer
+  dead-letters every remaining change.
+- **A throttled lookup could duplicate an event.** Before creating a copy, the engine looks
+  for an existing one, and a failed lookup was treated as "none found". After a throttle or
+  an outage that meant a duplicate. Those failures now end the run, and the next run looks
+  again.
+- **An expired Microsoft client secret was retried silently.** It is now reported to the
+  operator at once as a failure.
+- The portal's sign-in page suggested putting the operator password on the command line,
+  where sudo logs it. It now points to `set-admin-password`, which prompts.
+
+### Added
+
+- `guard-audit --pair N`: read-only. Lists which mapped events the sync may still write to,
+  and why the others are refused.
+- `set-max-writes --pair N --max K`: set a pair's circuit-breaker limit.
+- Public unit tests (`Tests.MT-CalSync`) and a CI workflow that builds with warnings as errors
+  and runs them.
+- README: what is and isn't synced (the window, one-way flow per event, attendees, instance
+  mode, supported accounts).
+
 ## [2026-09-25] - deletions in Microsoft 365 reach Google
 
 ### Fixed

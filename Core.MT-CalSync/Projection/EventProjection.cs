@@ -5,11 +5,11 @@ namespace Core.MTCalSync
 	// payload written to the mirror side. Engine/mapping/stamping/locking are
 	// identical across modes.
 	//
-	// M1–M3 are instance-level: providers return expanded occurrences, so Project
+	// Instance mode: providers return expanded occurrences, so Project
 	// returns exactly one unit per source event. Recurring instances carry a stable
 	// (originSeriesKey, occurrenceOriginalStartUtc) so series-shrink can delete
-	// mirrors whose source occurrence was cancelled/moved out of window. Series/RRULE
-	// preservation (M4) would return a series_master unit instead — same interface.
+	// mirrors whose source occurrence was cancelled/moved out of window. Series
+	// mode passes recurring masters, with their RRULE, through the same interface.
 	public interface IEventProjection
 	{
 		string Kind { get; }
@@ -43,6 +43,7 @@ namespace Core.MTCalSync
 				TimeZoneId = string.IsNullOrWhiteSpace(src.TimeZoneId) ? "UTC" : src.TimeZoneId,
 				IsAllDay = src.IsAllDay,
 				ShowAs = string.IsNullOrWhiteSpace(src.ShowAs) ? "busy" : src.ShowAs,
+				IsPrivate = src.IsPrivate,
 				UnitKind = isOcc ? UnitKinds.Occurrence : UnitKinds.Single,
 				OriginSeriesKey = seriesKey,
 				OccurrenceOriginalStartUtc = src.OccurrenceOriginalStartUtc

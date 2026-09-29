@@ -8,7 +8,9 @@ Type=exec
 User=mtcalsync
 Group=mtcalsync
 WorkingDirectory=/opt/mtcalsync/selfhost-publish
-ExecStart=/usr/bin/dotnet /opt/mtcalsync/selfhost-publish/SelfHost.MT-CalSync.dll
+# The apphost, not `dotnet X.dll`: it runs a self-contained build and a framework-dependent
+# one alike, so the unit need not change with the build type.
+ExecStart=/opt/mtcalsync/selfhost-publish/SelfHost.MT-CalSync
 Restart=on-failure
 RestartSec=5
 SyslogIdentifier=mtcalsync-selfhost

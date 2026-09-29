@@ -7,8 +7,8 @@
 -- no migration tracking.
 --
 -- Self-host uses the built-in tenant id 1 for the userID/customerID columns, which
--- have NO foreign keys here so the engine schema applies standalone. The hosted SaaS
--- layer adds the identity/billing tables (and the oauth_account -> user/customer FKs)
+-- have NO foreign keys here so the engine schema applies standalone. An application
+-- built on the engine can add its own identity tables (and the oauth_account FKs)
 -- on top.
 
 -- oauth_account: a user's OAuth grant for one external account (Microsoft or Google).

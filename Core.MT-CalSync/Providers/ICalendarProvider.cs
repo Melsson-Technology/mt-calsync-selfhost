@@ -44,7 +44,7 @@ namespace Core.MTCalSync
 
 		// Enumerate the calendars the principal can access (calendar picker). Google
 		// returns the impersonated user's calendar list (primary + shared/subscribed);
-		// Graph is a stub for now (destination is always the mailbox default calendar).
+		// Graph returns none: its destination is always the mailbox default calendar.
 		Task<IReadOnlyList<RemoteCalendar>> ListCalendarsAsync();
 
 		// Incremental pull: the changes since the stored token, or every event in `window` when

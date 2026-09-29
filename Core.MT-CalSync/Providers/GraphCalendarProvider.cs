@@ -153,7 +153,7 @@ namespace Core.MTCalSync
 				foreach (var mid in masterIds)
 				{
 					try { var master = await GetAsync(mid); if (master != null) cs.Items.Add(master); }
-					catch (Exception ex) { Common.writeToLog("WARN fetch series master " + mid + ": " + ex.Message); }
+					catch (ProviderException ex) when (!ex.IsTransient) { Common.writeToLog("WARN fetch series master " + mid + ": " + ex.Message); }
 				}
 				// Series deletion: a removed occurrence whose master is truly gone → emit a
 				// synthetic deleted master so the mirror recurring event is removed.
@@ -161,7 +161,7 @@ namespace Core.MTCalSync
 				{
 					if (masterIds.Contains(mid)) continue;
 					try { if (await GetAsync(mid) == null) cs.Items.Add(new RemoteEvent { Provider = Providers.M365, Id = mid, IsDeleted = true }); }
-					catch (Exception ex) { Common.writeToLog("WARN check removed master " + mid + ": " + ex.Message); }
+					catch (ProviderException ex) when (!ex.IsTransient) { Common.writeToLog("WARN check removed master " + mid + ": " + ex.Message); }
 				}
 			}
 			else
@@ -179,7 +179,7 @@ namespace Core.MTCalSync
 						&& (string.IsNullOrEmpty(re.ICalUid) || string.IsNullOrEmpty(re.Subject)))
 					{
 						try { var full = await GetAsync(re.Id); if (full != null) re = full; }
-						catch (Exception ex) { Common.writeToLog("WARN enrich occurrence " + re.Id + ": " + ex.Message); }
+						catch (ProviderException ex) when (!ex.IsTransient) { Common.writeToLog("WARN enrich occurrence " + re.Id + ": " + ex.Message); }
 					}
 					cs.Items.Add(re);
 				}
@@ -285,7 +285,7 @@ namespace Core.MTCalSync
 				var ev = found?.FirstOrDefault(e => StampPairMatches(e, pairId));
 				return ev == null ? null : ToRemoteEvent(ev);
 			}
-			catch (Exception ex) { Common.writeToLog("WARN FindByStampAsync (graph): " + ex.Message); return null; }
+			catch (Exception ex) { ThrowIfTransient(ex, "graph.FindByStampAsync"); Common.writeToLog("WARN FindByStampAsync (graph): " + ex.Message); return null; }
 		}
 
 		public async Task<IReadOnlyList<RemoteEvent>> ListByStampPairAsync(long pairId, int max)
@@ -325,7 +325,7 @@ namespace Core.MTCalSync
 					strays.Add(ToRemoteEvent(e));
 				}
 			}
-			catch (Exception ex) { Common.writeToLog("WARN ListByStampPairAsync (graph): " + ex.Message); }
+			catch (Exception ex) { ThrowIfTransient(ex, "graph.ListByStampPairAsync"); Common.writeToLog("WARN ListByStampPairAsync (graph): " + ex.Message); }
 			return strays;
 		}
 
@@ -368,7 +368,7 @@ namespace Core.MTCalSync
 				var ev = found?.FirstOrDefault();
 				return ev == null ? null : ToRemoteEvent(ev);
 			}
-			catch (Exception ex) { Common.writeToLog("WARN FindByICalUidAsync (graph): " + ex.Message); return null; }
+			catch (Exception ex) { ThrowIfTransient(ex, "graph.FindByICalUidAsync"); Common.writeToLog("WARN FindByICalUidAsync (graph): " + ex.Message); return null; }
 		}
 
 		// ── writes ──────────────────────────────────────────────────────────
@@ -414,6 +414,7 @@ namespace Core.MTCalSync
 				Body = new ItemBody { ContentType = BodyType.Text, Content = u.Body ?? string.Empty },
 				IsAllDay = u.IsAllDay,
 				ShowAs = MapShowAsToGraph(u.ShowAs),
+				Sensitivity = u.IsPrivate ? Sensitivity.Private : Sensitivity.Normal,
 				Location = string.IsNullOrEmpty(u.Location) ? null : new Location { DisplayName = u.Location },
 				Start = ToGraphDateTime(u.StartUtc, u.IsAllDay),
 				End = ToGraphDateTime(u.EndUtc, u.IsAllDay),
@@ -439,6 +440,7 @@ namespace Core.MTCalSync
 					Body = new ItemBody { ContentType = BodyType.Text, Content = u.Body ?? string.Empty },
 					Location = string.IsNullOrEmpty(u.Location) ? null : new Location { DisplayName = u.Location },
 					ShowAs = MapShowAsToGraph(u.ShowAs),
+					Sensitivity = u.IsPrivate ? Sensitivity.Private : Sensitivity.Normal,
 					Start = ToGraphDateTime(u.StartUtc, u.IsAllDay),
 					End = ToGraphDateTime(u.EndUtc, u.IsAllDay),
 					SingleValueExtendedProperties = BuildStampProps(u, pairId, version)   // provenance (hygiene/recovery)
@@ -539,8 +541,9 @@ namespace Core.MTCalSync
 				Body = e.Body?.Content,
 				Location = e.Location?.DisplayName,
 				ShowAs = MapShowAsFromGraph(e.ShowAs),
+				IsPrivate = e.Sensitivity == Sensitivity.Private || e.Sensitivity == Sensitivity.Confidential,
 				SeriesMasterId = e.SeriesMasterId,
-				RecurrenceRule = null,   // series master RRULE mapping is M4
+				RecurrenceRule = null,   // set by the series-mode read path
 				TimeZoneId = "UTC"
 			};
 			re.StartUtc = ParseGraphDate(e.Start);
@@ -552,6 +555,7 @@ namespace Core.MTCalSync
 				re.IsSeriesMaster = true;
 				re.RecurrenceRule = RecurrenceConverter.GraphToRRule(e.Recurrence);
 			}
+			re.AttendeeCount = e.Attendees?.Count ?? 0;
 			if (e.Attendees != null)
 				foreach (var a in e.Attendees)
 					if (!string.IsNullOrWhiteSpace(a.EmailAddress?.Name)) re.AttendeeNames.Add(a.EmailAddress!.Name!);
@@ -592,8 +596,19 @@ namespace Core.MTCalSync
 
 		private static string Escape(string s) => (s ?? string.Empty).Replace("'", "''");
 
+		// The lookups behind match-before-create treat a failure as "not found". That is safe
+		// only for a permanent refusal: after a throttle or an outage, "not found" plans a
+		// create and duplicates an event that exists. So those, and a dead grant, end the run
+		// instead, and the next run looks again.
+		private static void ThrowIfTransient(Exception ex, string op)
+		{
+			var pe = Translate(ex, op);
+			if (pe.IsTransient) throw pe;
+		}
+
 		private static ProviderException Translate(Exception ex, string op)
 		{
+			NeedsReauthException.ThrowIfWrapped(ex);
 			if (ex is ApiException ax)
 			{
 				int code = ax.ResponseStatusCode;

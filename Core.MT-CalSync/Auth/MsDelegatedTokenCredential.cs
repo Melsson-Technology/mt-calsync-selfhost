@@ -66,8 +66,11 @@ namespace Core.MTCalSync
 						account.markNeedsReauth(_accountId, $"{res.Error}: {res.ErrorDescription}");
 						throw new NeedsReauthException(_accountId, Providers.M365, "Refresh token rejected (invalid_grant).");
 					}
-					// Transient endpoint trouble — fail this run without flagging the account.
-					throw new ProviderException($"ms.token: {res.Error}: {res.ErrorDescription}", res.Error, isTransient: true);
+					// invalid_client is the app's own secret, expired or wrong: no retry fixes it,
+					// so it alerts the operator at once. Anything else is endpoint trouble — fail
+					// this run without flagging the account.
+					bool appMisconfigured = res.Error == "invalid_client" || res.Error == "unauthorized_client";
+					throw new ProviderException($"ms.token: {res.Error}: {res.ErrorDescription}", res.Error, isTransient: !appMisconfigured);
 				}
 
 				var expiresAt = DateTime.UtcNow.AddSeconds(Math.Max(60, res.ExpiresInSeconds));

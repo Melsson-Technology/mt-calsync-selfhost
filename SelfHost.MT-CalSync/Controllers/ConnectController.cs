@@ -176,7 +176,7 @@ namespace SelfHost.MTCalSync.Controllers
 				await GoogleOAuthFlow.RevokeAsync(account.decryptRefreshToken());
 			// Microsoft has no per-app revoke endpoint: deleting our stored tokens ends
 			// access (the surviving access token dies within the hour). Users can also
-			// revoke via myapps.microsoft.com — noted in the privacy policy.
+			// revoke it themselves at myapps.microsoft.com.
 
 			foreach (var conn in connections) pc.delete(conn.connectionID);
 			account.delete(accountId);

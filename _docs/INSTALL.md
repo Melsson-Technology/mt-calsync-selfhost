@@ -1,18 +1,32 @@
 # Installing MT-CalSync (self-host)
 
 MT-CalSync runs as a systemd worker (the sync tick) plus a small Kestrel admin
-portal, backed by MySQL 8. It's a framework-dependent .NET 8 app.
+portal, backed by MySQL 8. It's a .NET 10 app: framework-dependent by default, or
+self-contained if you'd rather not install a runtime on the server.
 
 ## 1. Server prerequisites
 
-You need the .NET 8 ASP.NET runtime, MySQL 8.0 or later (MariaDB is not supported), and
-optionally nginx and certbot for TLS. The steps differ by distribution.
+You need MySQL 8.0 or later (MariaDB is not supported), the ASP.NET Core 10 runtime unless
+you build self-contained (step 2), and optionally nginx and certbot for TLS. The steps
+differ by distribution.
 
-### Ubuntu 24.04 or 22.04
+**On a server that already runs other .NET applications, check before installing the
+runtime.** On Ubuntu 24.04, `aspnetcore-runtime-10.0` conflicts with `dotnet-host-8.0`, and
+apt resolves that by removing `/usr/bin/dotnet`, which the other applications need. Simulate
+first:
+
+```bash
+sudo apt-get update && apt-get install -s -y aspnetcore-runtime-10.0 | grep '^Remv'   # anything listed: don't install it
+```
+
+If anything is listed, skip the runtime and build self-contained in step 2. "Unable to locate
+package" means the check didn't run: on Debian, add Microsoft's feed (below) first.
+
+### Ubuntu 24.04
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y aspnetcore-runtime-8.0
+sudo apt-get install -y aspnetcore-runtime-10.0     # not needed for a self-contained build
 sudo apt-get install -y mysql-server
 # Optional: TLS-terminating reverse proxy
 sudo apt-get install -y nginx certbot python3-certbot-nginx
@@ -27,7 +41,7 @@ come from their vendors' own repositories:
 sudo apt-get update
 sudo apt-get install -y gnupg curl
 
-# .NET 8, from Microsoft's package feed
+# .NET 10, from Microsoft's package feed (not needed for a self-contained build)
 curl -fsSL -o /tmp/packages-microsoft-prod.deb https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb
 sudo dpkg -i /tmp/packages-microsoft-prod.deb
 
@@ -40,7 +54,7 @@ echo "deb [signed-by=/usr/share/keyrings/mysql.gpg] http://repo.mysql.com/apt/de
   | sudo tee /etc/apt/sources.list.d/mysql.list
 
 sudo apt-get update
-sudo apt-get install -y aspnetcore-runtime-8.0
+sudo apt-get install -y aspnetcore-runtime-10.0
 # Non-interactive, so the MySQL root password stays blank and root signs in over the
 # Unix socket, which provision.sh relies on. A root password set at the prompt instead
 # would stop provision.sh from connecting.
@@ -50,19 +64,26 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y mysql-server
 sudo apt-get install -y nginx certbot python3-certbot-nginx
 ```
 
+Other distributions: see <https://learn.microsoft.com/dotnet/core/install/linux> for the
+runtime, or build self-contained.
+
 ## 2. Build a release bundle (on your workstation)
 
-Requires the .NET 8 SDK and PowerShell (`pwsh`).
+Requires the .NET 10 SDK.
 
 ```bash
 git clone https://github.com/Melsson-Technology/mt-calsync-selfhost.git mt-calsync && cd mt-calsync
-pwsh ./scripts/build-and-package.ps1
+./scripts/build-and-package.sh
 # -> build/mtcalsync-engine.tar.gz  (worker + self-host portal + schema + deploy assets)
 scp build/mtcalsync-engine.tar.gz user@server:/tmp/
 ```
 
-On Windows without PowerShell 7, the built-in Windows PowerShell runs the same script:
-`powershell -ExecutionPolicy Bypass -File .\scripts\build-and-package.ps1`.
+`./scripts/build-and-package.sh --self-contained` bundles the .NET runtime into the build,
+so the server needs none. The tarball is larger, and the runtime's security patches then
+arrive only when you rebuild and redeploy, rather than through the server's package manager.
+
+On Windows, the same script is in PowerShell:
+`powershell -ExecutionPolicy Bypass -File .\scripts\build-and-package.ps1 [-SelfContained]`.
 
 ## 3. Provision + deploy (on the server, as root)
 
@@ -84,11 +105,17 @@ secret), and installs the systemd units.
 the bundle: the service account owns only the two publish directories, and everything
 else under `/opt/mtcalsync` stays root's.
 
+**Upgrading.** Build the new release, copy it up, unpack it and run *its*
+`deploy/deploy-on-server.sh`, exactly as above; `provision.sh` and the schema load need not
+be repeated unless the release notes say so. Don't run the copy under `/opt/mtcalsync/deploy`:
+that is the previous release's script. Before the .NET 10 release, that script checked for no
+runtime and kept the old units, so a .NET 10 build deployed with it fails to start.
+
 ## 4. Configure
 
 ```bash
 # A wrapper for the worker CLI, used below and in the README:
-alias mtcs='sudo -u mtcalsync dotnet /opt/mtcalsync/worker-publish/Worker.MT-CalSync.dll'
+alias mtcs='sudo -u mtcalsync /opt/mtcalsync/worker-publish/Worker.MT-CalSync'
 
 # The portal operator login (single admin; stored as a PBKDF2 hash). It prompts, so the
 # password never appears on a command line, where sudo would record it in the system log.

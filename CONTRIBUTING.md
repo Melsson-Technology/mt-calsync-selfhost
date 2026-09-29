@@ -44,7 +44,7 @@ much as it is written for future contributors.
 
 ## Getting started
 
-You need a **.NET 8 SDK** and a **MySQL 8** database you can throw away.
+You need a **.NET 10 SDK** and a **MySQL 8** database you can throw away.
 
 ```bash
 git clone https://github.com/Melsson-Technology/mt-calsync-selfhost.git
@@ -63,13 +63,14 @@ dotnet run --project SelfHost.MT-CalSync -- --urls http://localhost:5091
 
 Without `--urls` it binds ASP.NET's default, <http://localhost:5000>.
 
-**On tests:** the engine does not ship a public test project yet. The suite that exercises
-encryption round-trips, the scheduler's gating and backoff, the OAuth token custody path, and
-the sync engine itself against in-memory calendars (through `ProviderFactory.TestOverride`)
-currently lives in the private repository alongside the hosted service, and splitting the
-provider-independent parts out is open work. If you are changing engine logic, say in the
-issue what you did to convince yourself it was right - that is the substitute for now, and
-we would rather know than not.
+**On tests:** `dotnet test Tests.MT-CalSync` runs the unit tests, which need no database or
+provider account: recurrence-rule translation, Outlook's GlobalObjectId, the write guard,
+event projection (fidelity modes, privacy, the content hash), encryption and password hashing.
+CI runs them on every push. The end-to-end checks, which drive the whole engine against
+in-memory calendars (through `ProviderFactory.TestOverride`) and a MySQL database, are not
+published yet; they cover delta tokens and deletions, the write guard, the circuit breaker,
+the reauth path and the scheduler's gating and backoff. If you are changing engine logic, say
+in the issue what you did to convince yourself it was right.
 
 ## Layout
 
@@ -101,8 +102,10 @@ Worth understanding before changing anything under `Core.MT-CalSync/Sync`:
   concrete occurrences over a rolling window rather than converting recurrence rules between
   providers, which is where calendar syncs classically break. Series mode exists and
   translates RRULEs; it is the sharper edge of the two.
-- **Failures are isolated per pair.** A circuit breaker parks a failing pair and a dead-letter
-  queue quarantines a single bad event, so one poisonous meeting cannot stall a calendar.
+- **Failures are isolated per pair.** A circuit breaker stops a run that plans more changes
+  than the pair's limit and applies nothing until an operator confirms with `sync --force`.
+  A dead-letter queue quarantines a single bad event, so one poisonous meeting cannot stall
+  a calendar.
 
 ## Things that will get a change sent back
 

@@ -50,8 +50,8 @@ namespace Core.MTCalSync
 
 	public static class RecurrenceModes
 	{
-		public const string Instance = "instance";   // mirror each occurrence (M1–M3)
-		public const string Series = "series";        // preserve masters + RRULE (M4)
+		public const string Instance = "instance";   // mirror each occurrence
+		public const string Series = "series";        // preserve masters + RRULE
 	}
 
 	// ── Provenance stamp keys (written into provider extended properties) ─────
@@ -137,11 +137,13 @@ namespace Core.MTCalSync
 		public string? Body { get; set; }
 		public string? Location { get; set; }
 		public string ShowAs { get; set; } = "busy";           // busy|free|tentative|oof
+		public bool IsPrivate { get; set; }                    // Outlook Private/Confidential, Google private/confidential
 		public string? SeriesMasterId { get; set; }            // Graph seriesMasterId / Google recurringEventId
 		public DateTime? OccurrenceOriginalStartUtc { get; set; }
 		public bool IsSeriesMaster { get; set; }               // series mode: this event IS a recurring master
-		public string? RecurrenceRule { get; set; }            // RRULE (series master) — full-detail M4
+		public string? RecurrenceRule { get; set; }            // RRULE (series master, series mode)
 		public List<string> AttendeeNames { get; set; } = new();
+		public int AttendeeCount { get; set; }                 // every attendee, named or not
 		public Provenance Stamp { get; set; } = new();         // parsed mtcs_* (may be unmanaged)
 
 		// An exception/override instance of a series (has a master + an original start),
@@ -162,6 +164,9 @@ namespace Core.MTCalSync
 		public string TimeZoneId { get; set; } = "UTC";
 		public bool IsAllDay { get; set; }
 		public string ShowAs { get; set; } = "busy";
+		// Marked private on the origin, so the mirror is written private too: on the other
+		// calendar, anyone the calendar is shared with sees only that the time is taken.
+		public bool IsPrivate { get; set; }
 		public string Subject { get; set; } = "Busy";
 		public string? Body { get; set; }
 		public string? Location { get; set; }
@@ -187,6 +192,9 @@ namespace Core.MTCalSync
 			  .Append(Location ?? string.Empty).Append('|')
 			  .Append(Body ?? string.Empty).Append('|')
 			  .Append(RecurrenceRule ?? string.Empty);
+			// Appended only when set, so every event that isn't private keeps the hash it had
+			// before privacy was carried across, and existing mirrors aren't all rewritten.
+			if (IsPrivate) sb.Append("|private");
 			return Common.Sha256Hex(sb.ToString());
 		}
 	}

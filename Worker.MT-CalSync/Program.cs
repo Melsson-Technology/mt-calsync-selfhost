@@ -9,14 +9,14 @@ namespace Worker.MTCalSync
 	// (SyncEngine / CliCommands). This is the self-host worker: sync runs for every
 	// enabled pair, with no subscription/entitlement gating layered on top.
 	//
-	//   dotnet Worker.MT-CalSync.dll setup-check
-	//   dotnet Worker.MT-CalSync.dll add-pair --m365-email a@corp.com --google-email b@fam.com
-	//   dotnet Worker.MT-CalSync.dll list-pairs
-	//   dotnet Worker.MT-CalSync.dll sync [--pair N] [--full] [--dry-run] [--force]
-	//   dotnet Worker.MT-CalSync.dll status | history --pair N | resync --pair N
-	//   dotnet Worker.MT-CalSync.dll pause --pair N | resume --pair N
-	//   dotnet Worker.MT-CalSync.dll dead-letters --pair N [--resolve M | --resolve-all]
-	//   dotnet Worker.MT-CalSync.dll test-email | set-secret <name> | set-admin-password
+	//   Worker.MT-CalSync setup-check
+	//   Worker.MT-CalSync add-pair --m365-email a@corp.com --google-email b@fam.com
+	//   Worker.MT-CalSync list-pairs
+	//   Worker.MT-CalSync sync [--pair N] [--full] [--dry-run] [--force]
+	//   Worker.MT-CalSync status | history --pair N | resync --pair N
+	//   Worker.MT-CalSync pause --pair N | resume --pair N
+	//   Worker.MT-CalSync dead-letters --pair N [--resolve M | --resolve-all]
+	//   Worker.MT-CalSync test-email | set-secret <name> | set-admin-password
 	public class Program
 	{
 		public static async Task<int> Main(string[] args)
@@ -77,6 +77,9 @@ namespace Worker.MTCalSync
 					case "purge-mirror":
 						await CliCommands.PurgeMirror(RequirePair(a), a.Str("provider"), a.Str("id")); return 0;
 
+					case "guard-audit":
+						await CliCommands.GuardAudit(RequirePair(a)); return 0;
+
 					case "goid":   // debug: goid decode <hex> | goid encode <cleanUid>
 						if (args.Length < 3) { Console.WriteLine("Usage: goid <decode|encode> <value>"); return 1; }
 						Console.WriteLine(args[1].ToLowerInvariant() == "encode"
@@ -92,6 +95,9 @@ namespace Worker.MTCalSync
 
 					case "resume":
 						return CliCommands.Pause(RequirePair(a), false) ? 0 : 1;
+
+					case "set-max-writes":
+						return CliCommands.SetMaxWrites(RequirePair(a), a.Long("max")) ? 0 : 1;
 
 					case "remove-pair":
 					{
@@ -229,8 +235,10 @@ namespace Worker.MTCalSync
 			Console.WriteLine("  history --pair N [--limit K]");
 			Console.WriteLine("  inspect --pair N [--subject TEXT]        read-only: dump both sides' in-window events + provenance");
 			Console.WriteLine("  purge-mirror --pair N --provider P --id X delete a managed mirror event + tombstone its mapping (guarded)");
+			Console.WriteLine("  guard-audit --pair N                     read-only: which mapped events the sync may write, and why not");
 			Console.WriteLine("  sync [--pair N] [--full] [--dry-run] [--force]");
 			Console.WriteLine("  resync --pair N | pause --pair N | resume --pair N");
+			Console.WriteLine("  set-max-writes --pair N --max K          the circuit breaker: changes one run may make (default 25)");
 			Console.WriteLine("  remove-pair --pair N                     delete a pair and the events it mirrored, on both calendars");
 			Console.WriteLine("  sweep-strays --pair N --dead M           delete stamped mirrors of DEAD pair M from live pair N's calendars");
 			Console.WriteLine("  repair-chains --pair N [--apply]         find/dismantle mirror-of-mirror chains (origin is itself a stamped mirror)");
