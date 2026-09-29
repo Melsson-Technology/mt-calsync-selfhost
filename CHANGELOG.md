@@ -8,6 +8,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Thi
 pre-1.0: releases are tagged from 0.1.0 on, and breaking changes are called out in
 their entry.
 
+## [0.1.2] - 2026-09-29 - install fixes from a fresh-machine test
+
+### Changed
+
+- `provision.sh` makes `/etc/mtcalsync/settings.xml` owned by root with the service
+  account's group (still `0640`), so the service can read its database connection and
+  encryption key but not rewrite them. It applies this on every run, so re-running it on an
+  existing install tightens that install too.
+- The sync timer ticks every minute (`AccuracySec=5s`); systemd's default batching spread
+  ticks over 60-100 seconds.
+- `remove-pair` no longer prints a raw log line before its message.
+- The portal's "no operator password" hint gives the full command rather than the README's
+  `mtcs` alias.
+
+### Documentation
+
+- INSTALL: how to install the .NET 10 SDK; the clone directory matches the README; scripting
+  `set-admin-password` uses the full command, since aliases aren't expanded in scripts; the
+  unpack step clears `/tmp/mtcalsync` first, so an upgrade doesn't mix releases.
+
 ## [0.1.1] - 2026-09-29 - cleanup
 
 ### Fixed

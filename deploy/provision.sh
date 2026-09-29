@@ -120,7 +120,7 @@ if [[ ! -f "$SETTINGS" ]]; then
 </settings>
 XML
     )
-    chown "$APP_USER:$APP_USER" "$SETTINGS"; chmod 0640 "$SETTINGS"
+    chmod 0640 "$SETTINGS"
     echo "    wrote $SETTINGS (fresh DataEncryptionKey generated)"
 else
     grep -q "<DataEncryptionKey>" "$SETTINGS" || {
@@ -151,6 +151,10 @@ else
         echo "    connection string now uses the database password (previous file: $backup)"
     fi
 fi
+
+# Root owns the file and the service account can only read it, so a compromised service
+# can't rewrite its own database connection or encryption key. Set on every run.
+chown root:"$APP_USER" "$SETTINGS"; chmod 0640 "$SETTINGS"
 
 echo "==> systemd units"
 install -m0644 "$(dirname "$0")/mtcalsync-worker@.service"  /etc/systemd/system/

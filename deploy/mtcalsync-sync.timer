@@ -9,6 +9,9 @@ Description=MT-CalSync sync scheduler tick (every minute)
 # oneshot, and the per-pair lease also guards against overlap.
 OnBootSec=2min
 OnUnitActiveSec=1min
+# systemd batches timers to a one-minute accuracy by default, which spreads ticks over
+# 60-100 s.
+AccuracySec=5s
 Unit=mtcalsync-worker@sync.service
 
 [Install]

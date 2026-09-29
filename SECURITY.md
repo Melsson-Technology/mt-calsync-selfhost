@@ -118,8 +118,8 @@ Google service-account JSON, and the SMTP password are encrypted with **AES-256-
 before being written to the database. Client and tenant IDs are stored in plain text, and
 so is a service-account key kept as a file rather than pasted into Settings. The
 key is `DataEncryptionKey` in `settings.xml` - base64 of 32 random bytes, generated per
-deployment with `openssl rand -base64 32`. The file is mode `0640`, owned by the service
-account.
+deployment with `openssl rand -base64 32`. The file is mode `0640`, owned by root with the
+service account's group, so the service can read it but not rewrite it.
 
 Three consequences worth stating plainly:
 

@@ -220,7 +220,7 @@ namespace Core.MTCalSync
 				r.Removed = true;
 				r.Message = $"Removed pair {pairId}; deleted {r.Deleted} mirrored event(s)" +
 					(keptReal > 0 ? $"; left {keptReal} adopted native event(s) untouched." : ".");
-				Common.audit($"teardown pair={pairId} deleted={r.Deleted} keptReal={keptReal}");
+				Common.writeToLog($"MTCS teardown pair={pairId} deleted={r.Deleted} keptReal={keptReal}");   // the log only: the caller prints r.Message
 				return r;
 			}
 			finally { lockRow.release(); }

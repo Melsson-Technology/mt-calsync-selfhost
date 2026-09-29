@@ -90,12 +90,13 @@ cd mt-calsync-selfhost
 scp build/mtcalsync-engine.tar.gz user@server:/tmp/
 
 # 2. On the server: unpack the deploy scripts, then provision, deploy, load the schema
-mkdir -p /tmp/mtcalsync && tar -xzf /tmp/mtcalsync-engine.tar.gz -C /tmp/mtcalsync
+rm -rf /tmp/mtcalsync && mkdir -p /tmp/mtcalsync && tar -xzf /tmp/mtcalsync-engine.tar.gz -C /tmp/mtcalsync
 sudo bash /tmp/mtcalsync/deploy/provision.sh
 sudo bash /tmp/mtcalsync/deploy/deploy-on-server.sh /tmp/mtcalsync-engine.tar.gz
 sudo bash /opt/mtcalsync/deploy/load-schema.sh mtcalsync
 
-# 3. Set the portal operator password (it prompts), then start the services
+# 3. Set the portal operator password (it prompts), then start the services.
+#    mtcs is a wrapper for the worker CLI; add the alias to ~/.bashrc to keep it.
 alias mtcs='sudo -u mtcalsync /opt/mtcalsync/worker-publish/Worker.MT-CalSync'
 mtcs set-admin-password
 sudo systemctl start mtcalsync-selfhost.service mtcalsync-sync.timer

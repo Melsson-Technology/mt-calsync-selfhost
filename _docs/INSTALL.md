@@ -69,10 +69,13 @@ runtime, or build self-contained.
 
 ## 2. Build a release bundle (on your workstation)
 
-Requires the .NET 10 SDK.
+Requires the .NET 10 SDK. On Ubuntu 24.04: `sudo apt-get install -y dotnet-sdk-10.0`;
+elsewhere see <https://learn.microsoft.com/dotnet/core/install>. Building on a server that
+already runs other .NET applications has the same `dotnet-host-8.0` conflict as step 1, so
+simulate the install first: `apt-get install -s -y dotnet-sdk-10.0 | grep '^Remv'`.
 
 ```bash
-git clone https://github.com/Melsson-Technology/mt-calsync-selfhost.git mt-calsync && cd mt-calsync
+git clone https://github.com/Melsson-Technology/mt-calsync-selfhost.git && cd mt-calsync-selfhost
 ./scripts/build-and-package.sh
 # -> build/mtcalsync-engine.tar.gz  (worker + self-host portal + schema + deploy assets)
 scp build/mtcalsync-engine.tar.gz user@server:/tmp/
@@ -90,7 +93,7 @@ On Windows, the same script is in PowerShell:
 ```bash
 # Unpack the bundle to reach its deploy scripts. They are run with `bash` because a bundle
 # built on Windows carries no executable bits.
-mkdir -p /tmp/mtcalsync && tar -xzf /tmp/mtcalsync-engine.tar.gz -C /tmp/mtcalsync
+rm -rf /tmp/mtcalsync && mkdir -p /tmp/mtcalsync && tar -xzf /tmp/mtcalsync-engine.tar.gz -C /tmp/mtcalsync
 sudo bash /tmp/mtcalsync/deploy/provision.sh           # service user, dirs, DB, key, units
 sudo bash /tmp/mtcalsync/deploy/deploy-on-server.sh /tmp/mtcalsync-engine.tar.gz
 sudo bash /opt/mtcalsync/deploy/load-schema.sh mtcalsync  # schema load; safe to re-run
@@ -114,18 +117,24 @@ runtime and kept the old units, so a .NET 10 build deployed with it fails to sta
 ## 4. Configure
 
 ```bash
-# A wrapper for the worker CLI, used below and in the README:
+# A wrapper for the worker CLI, used below and in the README (add it to ~/.bashrc to keep it):
 alias mtcs='sudo -u mtcalsync /opt/mtcalsync/worker-publish/Worker.MT-CalSync'
 
 # The portal operator login (single admin; stored as a PBKDF2 hash). It prompts, so the
 # password never appears on a command line, where sudo would record it in the system log.
 mtcs set-admin-password
 
-# Start the portal + the 1-minute sync timer:
+# Start the sync timer. deploy-on-server.sh has already started the portal; naming it here
+# is harmless and covers a portal stopped since.
 sudo systemctl start mtcalsync-selfhost.service mtcalsync-sync.timer
 ```
 
-To script it, pipe the password in instead: `printf '%s\n' "$PASSWORD" | mtcs set-admin-password`.
+To script it, pipe the password in, and use the full command, because aliases aren't
+expanded in scripts:
+
+```bash
+printf '%s\n' "$PASSWORD" | sudo -u mtcalsync /opt/mtcalsync/worker-publish/Worker.MT-CalSync set-admin-password
+```
 
 The portal listens only on loopback, `127.0.0.1:5091`. For a quick look without a proxy,
 use an SSH tunnel: `ssh -L 5091:127.0.0.1:5091 user@server`, then open
